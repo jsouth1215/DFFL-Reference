@@ -283,14 +283,22 @@ with tab1:
     szn_stats = reg_season.groupby('Season').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum'), PA=('Opp_Points', 'sum')).reset_index()
     szn_stats['Win %'] = (szn_stats['W'] / (szn_stats['W'] + szn_stats['L'] + szn_stats['T'])).fillna(0)
     szn_stats['Win %'] = szn_stats['Win %'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1 else f"{x:.3f}")
-    szn_stats['PF'] = szn_stats['PF'].round(1)
-    szn_stats['PA'] = szn_stats['PA'].round(1)
+    
+    # Calculate Per Game Metrics
+    szn_stats['Games'] = szn_stats['W'] + szn_stats['L'] + szn_stats['T']
+    szn_stats['PF/G'] = (szn_stats['PF'] / szn_stats['Games']).apply(lambda x: f"{x:.1f}")
+    szn_stats['PA/G'] = (szn_stats['PA'] / szn_stats['Games']).apply(lambda x: f"{x:.1f}")
+    
+    # Format PF and PA as integers
+    szn_stats['PF'] = szn_stats['PF'].astype(int)
+    szn_stats['PA'] = szn_stats['PA'].astype(int)
     
     all_reg = games[games['Game_Type'] == 1]
-    pf_totals = all_reg.groupby(['Season', 'Team_Name'])['Actual_Points'].sum().reset_index()
+    pf_totals = all_reg.groupby(['Season', 'Team_Name']).agg(Actual_Points=('Actual_Points', 'sum'), Opp_Points=('Opp_Points', 'sum')).reset_index()
     pf_totals['PF_Rank'] = pf_totals.groupby('Season')['Actual_Points'].rank(ascending=False, method='min').astype(int)
+    pf_totals['PA_Rank'] = pf_totals.groupby('Season')['Opp_Points'].rank(ascending=False, method='min').astype(int)
     
-    pf_totals_team = pf_totals[pf_totals['Team_Name'] == selected_team][['Season', 'PF_Rank']]
+    pf_totals_team = pf_totals[pf_totals['Team_Name'] == selected_team][['Season', 'PF_Rank', 'PA_Rank']]
     szn_stats = pd.merge(szn_stats, pf_totals_team, on='Season', how='left')
     
     outcomes = []
@@ -301,11 +309,11 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF_Rank', 'PA', 'Playoff Outcome']
-    display_df = szn_stats[display_cols].sort_values('Season', ascending=False).rename(columns={'PF_Rank': 'PF Rank'})
+    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF Rank', 'PF/G', 'PA', 'PA Rank', 'PA/G', 'Playoff Outcome']
+    display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
-    styled_df = display_df.style.hide(axis='index').set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
-    st.dataframe(styled_df, use_container_width=True)
+    styled_df = display_df.style.set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
     
     st.divider()
     st.write("### Playoff Game Log")
