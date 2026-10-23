@@ -254,7 +254,7 @@ with tab1:
     
     tw, tl, tt = reg_season['W'].sum(), reg_season['L'].sum(), reg_season['T'].sum()
     win_pct = tw / (tw + tl + tt) if (tw + tl + tt) > 0 else 0.0
-    pf, pa = reg_season['Actual_Points'].sum(), reg_season['Opp_Points'].sum()
+    win_pct_str = f"{win_pct:.3f}".replace("0.", ".", 1) if win_pct < 1 else f"{win_pct:.3f}"
     
     if not mgr_games.empty:
         high_row = mgr_games.loc[mgr_games['Actual_Points'].idxmax()]
@@ -272,9 +272,8 @@ with tab1:
     high_scorer_count = mgr_games['Is_High_Scorer'].sum()
     longest_w, w_span, longest_l, l_span = get_detailed_streaks(mgr_games)
     
-    st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct:.3f}) | **Playoff Record:** {pw}-{pl}-{pt}")
-    st.markdown(f"**All-Time Points:** {pf:,.1f} PF | {pa:,.1f} PA")
-    st.markdown(f"**Championships:** {champ_str} | **Weekly High Scorer (Since 2019):** {high_scorer_count}")
+    st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str}) | **Playoff Record:** {pw}-{pl}-{pt}")
+    st.markdown(f"**Championships:** {champ_str} | **Weekly Bags Won:** {high_scorer_count}")
     st.markdown(f"**Highest Game:** {high_score_str}")
     st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
     st.markdown(f"**Longest Losing Streak:** {longest_l} games ({l_span})")
@@ -282,7 +281,8 @@ with tab1:
     
     st.write("### Season-by-Season (Regular Season)")
     szn_stats = reg_season.groupby('Season').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum'), PA=('Opp_Points', 'sum')).reset_index()
-    szn_stats['Win %'] = (szn_stats['W'] / (szn_stats['W'] + szn_stats['L'] + szn_stats['T'])).round(3)
+    szn_stats['Win %'] = (szn_stats['W'] / (szn_stats['W'] + szn_stats['L'] + szn_stats['T'])).fillna(0)
+    szn_stats['Win %'] = szn_stats['Win %'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1 else f"{x:.3f}")
     szn_stats['PF'] = szn_stats['PF'].round(1)
     szn_stats['PA'] = szn_stats['PA'].round(1)
     
@@ -301,8 +301,11 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    display_cols = ['Season', 'W', 'L', 'T', 'Win %', 'PF', 'PF_Rank', 'PA', 'Playoff Outcome']
-    st.dataframe(szn_stats[display_cols].sort_values('Season', ascending=False).rename(columns={'PF_Rank': 'PF Rank'}), use_container_width=True, hide_index=True)
+    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF_Rank', 'PA', 'Playoff Outcome']
+    display_df = szn_stats[display_cols].sort_values('Season', ascending=False).rename(columns={'PF_Rank': 'PF Rank'})
+    
+    styled_df = display_df.style.hide(axis='index').set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
+    st.dataframe(styled_df, use_container_width=True)
     
     st.divider()
     st.write("### Playoff Game Log")
