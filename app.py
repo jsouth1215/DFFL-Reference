@@ -86,21 +86,34 @@ def load_data():
     
     games = games.dropna(subset=['Team_Name', 'Actual_Points'])
     games = games[~((games['Actual_Points'] == 0) & (games['Opp_Points'] == 0))]
-    games = games[(games['Team_Name'].str.upper() != 'BYE') & (games['Opponent_Team_Name'].str.upper() != 'BYE')]
     
-    if 'Playoff_Round' in games.columns:
-        games = games[~games['Playoff_Round'].astype(str).str.contains('Consolation|3rd', case=False, na=False)]
+    # Strip explicit "BYE" team entry but keep active teams' rows when they play a BYE
+    games = games[games['Team_Name'].str.upper() != 'BYE']
+    
+    def map_game_type(row):
+        gt = str(row.get('Game_Type_Str', '')).strip()
+        pr = str(row.get('Playoff_Round', '')).lower()
+        opp = str(row.get('Opponent_Team_Name', '')).strip().upper()
+        
+        if opp == 'BYE': return 4 # Playoff Bye
+        if gt == 'Regular Season': return 1 # Regular Season
+        if 'consolation' in pr or '3rd' in pr: return 3 # Consolation
+        return 2 # Official Playoff Game
+
+    games['Game_Type'] = games.apply(map_game_type, axis=1)
+    
+    games['Opp_Points'] = pd.to_numeric(games['Opp_Points'], errors='coerce').fillna(0)
     
     games['W'] = (games['Actual_Points'] > games['Opp_Points']).astype(int)
     games['L'] = (games['Actual_Points'] < games['Opp_Points']).astype(int)
     games['T'] = ((games['Actual_Points'] == games['Opp_Points']) & (games['Actual_Points'] > 0)).astype(int)
     
-    games['Game_Type'] = games['Game_Type_Str'].apply(lambda x: 1 if str(x).strip() == 'Regular Season' else 2)
     games['Margin'] = (games['Actual_Points'] - games['Opp_Points']).abs().round(2)
     
     games['Season_Num'] = pd.to_numeric(games['Season'], errors='coerce')
     games['Week_Num'] = pd.to_numeric(games['Week'], errors='coerce')
     
+    # Calculate Weekly Bags Won on entire pool prior to filtering any brackets
     max_scores = games.groupby(['Season', 'Week'])['Actual_Points'].transform('max')
     games['Is_High_Scorer'] = (games['Actual_Points'] == max_scores) & (games['Season_Num'] >= 2019)
     
@@ -323,10 +336,35 @@ with tab1:
     champ_str = f"{len(champ_years)} ({', '.join(champ_years)})" if champ_years else "0"
     
     high_scorer_count = mgr_games['Is_High_Scorer'].sum()
-    longest_w, w_span, longest_l, l_span = get_detailed_streaks(mgr_games)
     
-    st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str}) | **Playoff Record:** {pw}-{pl}-{pt}")
-    st.markdown(f"**Championships:** {champ_str} | **Weekly Bags Won:** {high_scorer_count}")
+    # Exclude byes and consolations for official W/L streak records
+    longest_w, w_span, longest_l, l_span = get_detailed_streaks(mgr_games[mgr_games['Game_Type'].isin([1, 2])])
+    
+    rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team]
+    playoff_apps = 0
+    playoff_byes = 0
+    
+    for _, row in rs_team.iterrows():
+        szn_str = str(row['Season']).strip()
+        if not szn_str.isdigit(): continue
+        szn = int(szn_str)
+        rank = float(row['RS_Rank'])
+        
+        if pd.isna(rank): continue
+        if szn == 2017 and rank <= 4:
+            playoff_apps += 1
+        elif szn > 2017 and rank <= 6:
+            playoff_apps += 1
+            
+        if szn >= 2018 and rank <= 2:
+            playoff_byes += 1
+            
+    st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
+    st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
+    st.markdown(f"**Playoff Appearances:** {playoff_apps}")
+    st.markdown(f"**Playoff Byes:** {playoff_byes}")
+    st.markdown(f"**Championships:** {champ_str}")
+    st.markdown(f"**Weekly Bags Won:** {high_scorer_count}")
     st.markdown(f"**Highest Game:** {high_score_str}")
     st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
     st.markdown(f"**Longest Losing Streak:** {longest_l} games ({l_span})")
@@ -360,10 +398,10 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team][['Season', 'RS_Rank']].copy()
-    rs_team['Season'] = rs_team['Season'].astype(str).str.replace('.0', '', regex=False)
+    rs_team_format = rs_team[['Season', 'RS_Rank']].copy()
+    rs_team_format['Season'] = rs_team_format['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    szn_stats = pd.merge(szn_stats, rs_team, on='Season', how='left')
+    szn_stats = pd.merge(szn_stats, rs_team_format, on='Season', how='left')
     
     szn_stats['Standings Finish'] = szn_stats['RS_Rank'].apply(
         lambda x: f"{int(x)}{'th' if 11 <= int(x) % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(int(x) % 10, 'th')}" if pd.notnull(x) else ""
@@ -416,11 +454,14 @@ with tab5:
     sched_season = col1.selectbox("Season", seasons_list, key='sched_szn')
     sched_team = col2.selectbox("Manager", teams, key='sched_team')
     
-    sched = games[(games['Season'] == sched_season) & (games['Team_Name'] == sched_team)].sort_values(['Game_Type', 'Week_Num'])
+    sched = games[(games['Season'] == sched_season) & (games['Team_Name'] == sched_team)].sort_values(['Game_Type', 'Week_Num']).copy()
     if not sched.empty:
-        sched['Result'] = sched.apply(lambda x: 'W' if x['W'] else ('L' if x['L'] else 'T'), axis=1)
+        type_mapping = {1: 'Regular Season', 2: 'Playoffs', 3: 'Consolation', 4: 'Playoff Bye'}
+        sched['Type'] = sched['Game_Type'].map(type_mapping)
+        
+        sched['Result'] = sched.apply(lambda x: 'BYE' if x['Game_Type'] == 4 else ('W' if x['W'] else ('L' if x['L'] else 'T')), axis=1)
         sched['Score'] = sched['Actual_Points'].round(1).astype(str) + " - " + sched['Opp_Points'].round(1).astype(str)
-        st.dataframe(sched[['Week', 'Game_Type_Str', 'Opponent_Team_Name', 'Result', 'Score', 'Margin']].rename(columns={'Opponent_Team_Name': 'Opponent', 'Game_Type_Str': 'Type'}), use_container_width=True, hide_index=True)
+        st.dataframe(sched[['Week', 'Type', 'Opponent_Team_Name', 'Result', 'Score', 'Margin']].rename(columns={'Opponent_Team_Name': 'Opponent'}), use_container_width=True, hide_index=True)
         
         view_sch_wk = st.selectbox("Select Week to View Box Score:", ["Select..."] + sched['Week'].unique().tolist(), key="sch_box")
         if view_sch_wk != "Select...":
@@ -504,12 +545,12 @@ with tab4:
         st.dataframe(low_scores, use_container_width=True, hide_index=True)
         
     elif record_type == "Biggest Blowouts":
-        blowouts = games[games['W'] == 1][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=False).head(15)
+        blowouts = games[(games['W'] == 1) & (games['Game_Type'] != 4)][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=False).head(15)
         blowouts['Season'] = blowouts['Season'].astype(str).str.replace('.0', '', regex=False)
         st.dataframe(blowouts, use_container_width=True, hide_index=True)
         
     elif record_type == "Closest Games":
-        closest = games[(games['W'] == 1) & (games['Margin'] > 0)][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=True).head(15)
+        closest = games[(games['W'] == 1) & (games['Margin'] > 0) & (games['Game_Type'] != 4)][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=True).head(15)
         closest['Season'] = closest['Season'].astype(str).str.replace('.0', '', regex=False)
         st.dataframe(closest, use_container_width=True, hide_index=True)
         
@@ -526,4 +567,4 @@ with tab4:
             bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
             bot2['Season'] = bot2['Season'].astype(str).str.replace('.0', '', regex=False)
             st.dataframe(bot2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}), use_container_width=True, hide_index=True)
-            
+        
