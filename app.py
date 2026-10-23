@@ -365,12 +365,11 @@ with tab1:
     
     szn_stats = pd.merge(szn_stats, rs_team, on='Season', how='left')
     
-    # Format Standings Finish as Ordinal (1st, 2nd, 3rd, etc.)
     szn_stats['Standings Finish'] = szn_stats['RS_Rank'].apply(
         lambda x: f"{int(x)}{'th' if 11 <= int(x) % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(int(x) % 10, 'th')}" if pd.notnull(x) else ""
     )
     
-    display_cols = ['Season', 'Standings Finish', 'W', 'L', 'Win %', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
+    display_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
     styled_html = display_df.style.hide(axis='index').set_properties(**{
@@ -390,7 +389,19 @@ with tab1:
     if not display_playoffs.empty:
         display_playoffs['Season'] = display_playoffs['Season'].astype(str).str.replace('.0', '', regex=False)
         display_playoffs['Score'] = display_playoffs['Actual_Points'].round(1).astype(str) + " - " + display_playoffs['Opp_Points'].round(1).astype(str)
-        st.dataframe(display_playoffs[['Season', 'Week', 'Playoff_Round', 'Opponent_Team_Name', 'Result', 'Score']].rename(columns={'Opponent_Team_Name': 'Opponent', 'Playoff_Round': 'Round'}), use_container_width=True, hide_index=True)
+        
+        po_display_df = display_playoffs[['Season', 'Week', 'Playoff_Round', 'Opponent_Team_Name', 'Result', 'Score']].rename(columns={'Opponent_Team_Name': 'Opponent', 'Playoff_Round': 'Round'})
+        
+        po_styled_html = po_display_df.style.hide(axis='index').set_properties(**{
+            'text-align': 'center',
+            'padding': '8px',
+            'border': '1px solid #e6e6e6'
+        }).set_table_styles([
+            {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '8px'), ('border', '1px solid #e6e6e6')]},
+            {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
+        ]).to_html()
+        
+        st.markdown(po_styled_html, unsafe_allow_html=True)
         
         display_playoffs['Game_Label'] = display_playoffs['Season'] + " Week " + display_playoffs['Week'].astype(str) + " vs " + display_playoffs['Opponent_Team_Name']
         view_po_wk = st.selectbox("Select Playoff Game to View Box Score:", ["Select..."] + display_playoffs['Game_Label'].tolist(), key="po_box")
