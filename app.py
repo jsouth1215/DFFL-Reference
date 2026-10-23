@@ -284,12 +284,10 @@ with tab1:
     szn_stats['Win %'] = (szn_stats['W'] / (szn_stats['W'] + szn_stats['L'] + szn_stats['T'])).fillna(0)
     szn_stats['Win %'] = szn_stats['Win %'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1 else f"{x:.3f}")
     
-    # Calculate Per Game Metrics
     szn_stats['Games'] = szn_stats['W'] + szn_stats['L'] + szn_stats['T']
     szn_stats['PF/G'] = (szn_stats['PF'] / szn_stats['Games']).apply(lambda x: f"{x:.1f}")
     szn_stats['PA/G'] = (szn_stats['PA'] / szn_stats['Games']).apply(lambda x: f"{x:.1f}")
     
-    # Format PF and PA as integers
     szn_stats['PF'] = szn_stats['PF'].astype(int)
     szn_stats['PA'] = szn_stats['PA'].astype(int)
     
@@ -309,11 +307,11 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF Rank', 'PF/G', 'PA', 'PA Rank', 'PA/G', 'Playoff Outcome']
+    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
-    styled_df = display_df.style.set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    styled_df = display_df.style.hide(axis='index').set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
+    st.table(styled_df)
     
     st.divider()
     st.write("### Playoff Game Log")
