@@ -307,11 +307,20 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
+    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF Rank', 'PF/G', 'PA', 'PA Rank', 'PA/G', 'Playoff Outcome']
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
-    styled_df = display_df.style.hide(axis='index').set_properties(**{'text-align': 'center'}).set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
-    st.table(styled_df)
+    # HTML Rendering for absolute center alignment across all columns
+    styled_html = display_df.style.hide(axis='index').set_properties(**{
+        'text-align': 'center',
+        'padding': '8px',
+        'border': '1px solid #e6e6e6'
+    }).set_table_styles([
+        {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '8px'), ('border', '1px solid #e6e6e6')]},
+        {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
+    ]).to_html()
+    
+    st.markdown(styled_html, unsafe_allow_html=True)
     
     st.divider()
     st.write("### Playoff Game Log")
