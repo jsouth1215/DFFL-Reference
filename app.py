@@ -11,6 +11,45 @@ def load_box_scores():
         return pd.DataFrame()
 
 @st.cache_data
+def load_rs_rankings(file_path, teams_list):
+    try:
+        df = pd.read_excel(file_path, sheet_name="All Time W-L", engine="pyxlsb", header=None)
+        
+        year_row_idx = None
+        team_col_idx = None
+        
+        for i, row in df.iterrows():
+            years_in_row = sum(1 for x in row if str(x).replace('.0','').strip().isdigit() and 2010 < int(str(x).replace('.0','').strip()) < 2030)
+            if years_in_row >= 3:
+                year_row_idx = i
+                break
+                
+        for j in df.columns:
+            matches = df[j].astype(str).apply(lambda x: x.strip() in teams_list).sum()
+            if matches >= 5:
+                team_col_idx = j
+                break
+                
+        if year_row_idx is not None and team_col_idx is not None:
+            headers = df.iloc[year_row_idx]
+            data = df.iloc[year_row_idx+1:].copy()
+            data.columns = headers
+            
+            data = data.rename(columns={headers[team_col_idx]: 'Team_Name'})
+            year_cols = [c for c in data.columns if str(c).replace('.0','').strip().isdigit() and 2010 < int(str(c).replace('.0','').strip()) < 2030]
+            
+            ranks_df = data[['Team_Name'] + year_cols].copy()
+            ranks_melt = ranks_df.melt(id_vars='Team_Name', var_name='Season', value_name='RS_Rank')
+            ranks_melt['Season'] = ranks_melt['Season'].astype(str).str.replace('.0', '', regex=False)
+            ranks_melt['RS_Rank'] = pd.to_numeric(ranks_melt['RS_Rank'], errors='coerce')
+            ranks_melt = ranks_melt.dropna(subset=['RS_Rank'])
+            ranks_melt['Team_Name'] = ranks_melt['Team_Name'].astype(str).str.strip()
+            return ranks_melt
+    except:
+        pass
+    return pd.DataFrame()
+
+@st.cache_data
 def load_data():
     file_path = "FantasyOddsModel2026-v1_2.xlsb"
     df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb")
@@ -235,6 +274,19 @@ st.title("🏈 DFFL History Hub")
 try:
     games = load_data()
     box_df = load_box_scores()
+    
+    teams_list = sorted(games['Team_Name'].dropna().unique().tolist())
+    rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams_list)
+    
+    # Fallback to pure mathematical calculation if parsing Excel grid fails
+    if rs_ranks_df.empty:
+        reg = games[games['Game_Type'] == 1]
+        szn_st = reg.groupby(['Season', 'Team_Name']).agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')).reset_index()
+        szn_st['Win %'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
+        szn_st = szn_st.sort_values(['Season', 'Win %', 'PF'], ascending=[False, False, False])
+        szn_st['RS_Rank'] = szn_st.groupby('Season').cumcount() + 1
+        rs_ranks_df = szn_st[['Season', 'Team_Name', 'RS_Rank']]
+
 except Exception as e:
     st.error(f"Could not load data. Error: {e}")
     st.stop()
@@ -307,10 +359,13 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    display_cols = ['Season', 'W', 'L', 'Win %', 'PF', 'PF Rank', 'PF/G', 'PA', 'PA Rank', 'PA/G', 'Playoff Outcome']
+    rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team][['Season', 'RS_Rank']]
+    szn_stats = pd.merge(szn_stats, rs_team, on='Season', how='left')
+    szn_stats['RS Rank'] = szn_stats['RS_Rank'].apply(lambda x: f"{int(x)}" if pd.notnull(x) else "")
+    
+    display_cols = ['Season', 'RS Rank', 'W', 'L', 'Win %', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
-    # HTML Rendering for absolute center alignment across all columns
     styled_html = display_df.style.hide(axis='index').set_properties(**{
         'text-align': 'center',
         'padding': '8px',
