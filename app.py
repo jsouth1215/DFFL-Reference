@@ -364,9 +364,13 @@ with tab1:
     rs_team['Season'] = rs_team['Season'].astype(str).str.replace('.0', '', regex=False)
     
     szn_stats = pd.merge(szn_stats, rs_team, on='Season', how='left')
-    szn_stats['RS Rank'] = szn_stats['RS_Rank'].apply(lambda x: f"{int(x)}" if pd.notnull(x) else "")
     
-    display_cols = ['Season', 'RS Rank', 'W', 'L', 'Win %', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
+    # Format Standings Finish as Ordinal (1st, 2nd, 3rd, etc.)
+    szn_stats['Standings Finish'] = szn_stats['RS_Rank'].apply(
+        lambda x: f"{int(x)}{'th' if 11 <= int(x) % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(int(x) % 10, 'th')}" if pd.notnull(x) else ""
+    )
+    
+    display_cols = ['Season', 'Standings Finish', 'W', 'L', 'Win %', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
     styled_html = display_df.style.hide(axis='index').set_properties(**{
