@@ -278,14 +278,15 @@ try:
     teams_list = sorted(games['Team_Name'].dropna().unique().tolist())
     rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams_list)
     
-    # Fallback to pure mathematical calculation if parsing Excel grid fails
     if rs_ranks_df.empty:
         reg = games[games['Game_Type'] == 1]
         szn_st = reg.groupby(['Season', 'Team_Name']).agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')).reset_index()
         szn_st['Win %'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
         szn_st = szn_st.sort_values(['Season', 'Win %', 'PF'], ascending=[False, False, False])
         szn_st['RS_Rank'] = szn_st.groupby('Season').cumcount() + 1
-        rs_ranks_df = szn_st[['Season', 'Team_Name', 'RS_Rank']]
+        rs_ranks_df = szn_st[['Season', 'Team_Name', 'RS_Rank']].copy()
+        
+    rs_ranks_df['Season'] = rs_ranks_df['Season'].astype(str).str.replace('.0', '', regex=False)
 
 except Exception as e:
     st.error(f"Could not load data. Error: {e}")
@@ -359,7 +360,9 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
-    rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team][['Season', 'RS_Rank']]
+    rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team][['Season', 'RS_Rank']].copy()
+    rs_team['Season'] = rs_team['Season'].astype(str).str.replace('.0', '', regex=False)
+    
     szn_stats = pd.merge(szn_stats, rs_team, on='Season', how='left')
     szn_stats['RS Rank'] = szn_stats['RS_Rank'].apply(lambda x: f"{int(x)}" if pd.notnull(x) else "")
     
