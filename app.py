@@ -390,6 +390,36 @@ with tab1:
         if szn >= 2018 and rank <= 2:
             playoff_byes += 1
             
+    # Calculate All-Time Leading NFL Player for Franchise
+    top_player_str = "N/A"
+    if not box_df.empty:
+        slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
+        name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
+        pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+        
+        if slot_c in box_df.columns and name_c in box_df.columns and pts_c in box_df.columns:
+            eligible_games = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name']].copy()
+            eligible_games['Season'] = eligible_games['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+            eligible_games['Week'] = eligible_games['Week'].astype(int)
+            eligible_games['Team_Name'] = eligible_games['Team_Name'].astype(str).str.strip()
+            
+            box_eligible = box_df[box_df['Team_Name'] == selected_team].copy()
+            box_eligible['Season'] = box_eligible['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+            box_eligible['Week'] = pd.to_numeric(box_eligible['Week'], errors='coerce').fillna(0).astype(int)
+            box_eligible['Team_Name'] = box_eligible['Team_Name'].astype(str).str.strip()
+            
+            is_starter = ~box_eligible[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+            starters_df = box_eligible[is_starter]
+            
+            counted_box = pd.merge(starters_df, eligible_games, on=['Season', 'Week', 'Team_Name'], how='inner')
+            
+            if not counted_box.empty:
+                counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
+                player_totals = counted_box.groupby(name_c)[pts_c].sum().reset_index()
+                if not player_totals.empty:
+                    top_player_row = player_totals.sort_values(pts_c, ascending=False).iloc[0]
+                    top_player_str = f"{top_player_row[name_c]} ({top_player_row[pts_c]:,.1f} pts)"
+            
     st.markdown(f"**Championships:** {champ_str}")
     st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
     st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
@@ -398,6 +428,7 @@ with tab1:
     st.markdown(f"**Weekly Bags Won:** {high_scorer_count}")
     st.markdown(f"**Highest Game:** {high_score_str}")
     st.markdown(f"**Lowest Game:** {low_score_str}")
+    st.markdown(f"**All-Time Top Scorer:** {top_player_str}")
     st.markdown(f"**Easiest Opponent:** {easiest_str}")
     st.markdown(f"**Toughest Opponent:** {toughest_str}")
     st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
