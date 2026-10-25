@@ -490,6 +490,10 @@ with tab1:
     
     szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
     
+    mgr_games['Season_Str'] = mgr_games['Season'].astype(str).str.replace('.0', '', regex=False)
+    bags_per_szn = mgr_games.groupby('Season_Str')['Is_High_Scorer'].sum().to_dict()
+    szn_stats['Weekly Bags'] = szn_stats['Season'].map(bags_per_szn).fillna(0).astype(int)
+    
     rs_team_format = rs_team[['Season', 'RS_Rank']].copy()
     rs_team_format['Season'] = rs_team_format['Season'].astype(str).str.replace('.0', '', regex=False)
     
@@ -504,7 +508,12 @@ with tab1:
     szn_stats['Top WR'] = szn_stats['Season'].map(top_wr_by_szn).fillna("")
     szn_stats['Top TE'] = szn_stats['Season'].map(top_te_by_szn).fillna("")
     
-    display_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Top QB', 'Top RB', 'Top WR', 'Top TE', 'Playoff Outcome']
+    display_cols = [
+        'Season', 'W', 'L', 'Win %', 'Standings Finish',
+        'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank',
+        'Playoff Outcome', 'Weekly Bags',
+        'Top QB', 'Top RB', 'Top WR', 'Top TE'
+    ]
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
     styled_html = display_df.style.hide(axis='index').set_properties(**{
@@ -586,9 +595,13 @@ with tab2:
     team_a = col1.selectbox("Team A", teams)
     team_b = col2.selectbox("Team B", [t for t in teams if t != team_a])
     
-    h2h_games = games[(games['Team_Name'] == team_a) & (games['Opponent_Team_Name'] == team_b)]
+    h2h_games = games[(games['Team_Name'] == team_a) & (games['Opponent_Team_Name'] == team_b) & (games['Game_Type'].isin([1, 2]))].copy()
     if not h2h_games.empty:
         w, l, t = h2h_games['W'].sum(), h2h_games['L'].sum(), h2h_games['T'].sum()
+        
+        po_h2h = h2h_games[h2h_games['Game_Type'] == 2]
+        pw, pl, pt = po_h2h['W'].sum(), po_h2h['L'].sum(), po_h2h['T'].sum()
+        
         st.write(f"### {team_a} vs. {team_b}")
         if w > l:
             st.markdown(f"**{team_a} leads series {w}-{l}-{t}**")
@@ -597,12 +610,31 @@ with tab2:
         else:
             st.markdown(f"**Series tied {w}-{l}-{t}**")
             
+        st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
+        st.divider()
+        
         display_h2h = h2h_games.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).copy()
         display_h2h['Season'] = display_h2h['Season'].astype(str).str.replace('.0', '', regex=False)
         display_h2h['Winner'] = display_h2h.apply(lambda x: x['Team_Name'] if x['W'] == 1 else (x['Opponent_Team_Name'] if x['L'] == 1 else 'Tie'), axis=1)
-        display_h2h = display_h2h.rename(columns={'Actual_Points': f'{team_a} Pts', 'Opp_Points': f'{team_b} Pts', 'Game_Type_Str': 'Type'})
+        display_h2h['Type'] = display_h2h['Game_Type'].map({1: 'Regular Season', 2: 'Playoffs'}).fillna(display_h2h['Game_Type_Str'])
         
-        st.dataframe(display_h2h[['Season', 'Week', 'Type', 'Winner', f'{team_a} Pts', f'{team_b} Pts', 'Margin']], use_container_width=True, hide_index=True)
+        display_h2h = display_h2h.rename(columns={'Actual_Points': f'{team_a} Pts', 'Opp_Points': f'{team_b} Pts'})
+        display_h2h[f'{team_a} Pts'] = display_h2h[f'{team_a} Pts'].round(1).astype(str)
+        display_h2h[f'{team_b} Pts'] = display_h2h[f'{team_b} Pts'].round(1).astype(str)
+        display_h2h['Margin'] = display_h2h['Margin'].round(1).astype(str)
+        
+        cols = ['Season', 'Week', 'Type', 'Winner', f'{team_a} Pts', f'{team_b} Pts', 'Margin']
+        h2h_styled_html = display_h2h[cols].style.hide(axis='index').set_properties(**{
+            'text-align': 'center',
+            'padding': '6px 8px',
+            'border': '1px solid #e6e6e6',
+            'white-space': 'nowrap'
+        }).set_table_styles([
+            {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
+            {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
+        ]).to_html()
+        
+        st.markdown(h2h_styled_html, unsafe_allow_html=True)
     else:
         st.write("No matchups found between these teams.")
 
