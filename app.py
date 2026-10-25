@@ -87,7 +87,6 @@ def load_data():
     games = games.dropna(subset=['Team_Name', 'Actual_Points'])
     games = games[~((games['Actual_Points'] == 0) & (games['Opp_Points'] == 0))]
     
-    # Strip explicit "BYE" team entry but keep active teams' rows when they play a BYE
     games = games[games['Team_Name'].str.upper() != 'BYE']
     
     def map_game_type(row):
@@ -95,10 +94,10 @@ def load_data():
         pr = str(row.get('Playoff_Round', '')).lower()
         opp = str(row.get('Opponent_Team_Name', '')).strip().upper()
         
-        if opp == 'BYE': return 4 # Playoff Bye
-        if gt == 'Regular Season': return 1 # Regular Season
-        if 'consolation' in pr or '3rd' in pr: return 3 # Consolation
-        return 2 # Official Playoff Game
+        if opp == 'BYE': return 4 
+        if gt == 'Regular Season': return 1 
+        if 'consolation' in pr or '3rd' in pr: return 3 
+        return 2 
 
     games['Game_Type'] = games.apply(map_game_type, axis=1)
     
@@ -113,7 +112,6 @@ def load_data():
     games['Season_Num'] = pd.to_numeric(games['Season'], errors='coerce')
     games['Week_Num'] = pd.to_numeric(games['Week'], errors='coerce')
     
-    # Calculate Weekly Bags Won on entire pool prior to filtering any brackets
     max_scores = games.groupby(['Season', 'Week'])['Actual_Points'].transform('max')
     games['Is_High_Scorer'] = (games['Actual_Points'] == max_scores) & (games['Season_Num'] >= 2019)
     
@@ -327,6 +325,40 @@ with tab1:
         high_score_str = f"{high_row['Actual_Points']:.1f} ({str(high_row['Season']).replace('.0','')}, W{high_row['Week']})"
     else:
         high_score_str = "N/A"
+        
+    comp_games = mgr_games[mgr_games['Game_Type'].isin([1, 2])]
+    if not comp_games.empty:
+        low_row = comp_games.loc[comp_games['Actual_Points'].idxmin()]
+        low_score_str = f"{low_row['Actual_Points']:.1f} ({str(low_row['Season']).replace('.0','')}, W{low_row['Week']})"
+        
+        valid_opp_games = comp_games[comp_games['Opponent_Team_Name'].str.upper() != 'CAM']
+        if not valid_opp_games.empty:
+            opp_stats = valid_opp_games.groupby('Opponent_Team_Name').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum')).reset_index()
+            opp_stats['Games'] = opp_stats['W'] + opp_stats['L'] + opp_stats['T']
+            opp_stats = opp_stats[opp_stats['Games'] > 0]
+            
+            if not opp_stats.empty:
+                opp_stats['Win %'] = opp_stats['W'] / opp_stats['Games']
+                
+                max_wp = opp_stats['Win %'].max()
+                easiest_df = opp_stats[opp_stats['Win %'] == max_wp]
+                easiest_names = ", ".join(easiest_df['Opponent_Team_Name'].tolist())
+                easiest_str = f"{easiest_names} ({max_wp:.3f})".replace("0.", ".", 1) if max_wp < 1 else f"{easiest_names} ({max_wp:.3f})"
+                
+                min_wp = opp_stats['Win %'].min()
+                toughest_df = opp_stats[opp_stats['Win %'] == min_wp]
+                toughest_names = ", ".join(toughest_df['Opponent_Team_Name'].tolist())
+                toughest_str = f"{toughest_names} ({min_wp:.3f})".replace("0.", ".", 1) if min_wp < 1 else f"{toughest_names} ({min_wp:.3f})"
+            else:
+                easiest_str = "N/A"
+                toughest_str = "N/A"
+        else:
+            easiest_str = "N/A"
+            toughest_str = "N/A"
+    else:
+        low_score_str = "N/A"
+        easiest_str = "N/A"
+        toughest_str = "N/A"
     
     pw, pl, pt = playoffs['W'].sum(), playoffs['L'].sum(), playoffs['T'].sum()
     
@@ -337,7 +369,6 @@ with tab1:
     
     high_scorer_count = mgr_games['Is_High_Scorer'].sum()
     
-    # Exclude byes and consolations for official W/L streak records
     longest_w, w_span, longest_l, l_span = get_detailed_streaks(mgr_games[mgr_games['Game_Type'].isin([1, 2])])
     
     rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team]
@@ -359,13 +390,16 @@ with tab1:
         if szn >= 2018 and rank <= 2:
             playoff_byes += 1
             
+    st.markdown(f"**Championships:** {champ_str}")
     st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
     st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
     st.markdown(f"**Playoff Appearances:** {playoff_apps}")
     st.markdown(f"**Playoff Byes:** {playoff_byes}")
-    st.markdown(f"**Championships:** {champ_str}")
     st.markdown(f"**Weekly Bags Won:** {high_scorer_count}")
     st.markdown(f"**Highest Game:** {high_score_str}")
+    st.markdown(f"**Lowest Game:** {low_score_str}")
+    st.markdown(f"**Easiest Opponent:** {easiest_str}")
+    st.markdown(f"**Toughest Opponent:** {toughest_str}")
     st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
     st.markdown(f"**Longest Losing Streak:** {longest_l} games ({l_span})")
     st.divider()
@@ -567,4 +601,4 @@ with tab4:
             bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
             bot2['Season'] = bot2['Season'].astype(str).str.replace('.0', '', regex=False)
             st.dataframe(bot2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}), use_container_width=True, hide_index=True)
-        
+            
