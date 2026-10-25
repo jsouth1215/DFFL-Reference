@@ -280,7 +280,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         else:
             st.markdown("#### Opponent Matchup Not Found")
 
-st.title("🏈 DFFL Hub")
+st.title("🏈 DFFL History Hub")
 
 try:
     games = load_data()
@@ -390,13 +390,18 @@ with tab1:
         if szn >= 2018 and rank <= 2:
             playoff_byes += 1
             
-    # Calculate All-Time & Per-Season Leading NFL Starters
+    # Calculate All-Time & Per-Season Leading NFL Starters by Position
     top_player_str = "N/A"
-    top_scorers_by_szn = {}
+    top_qb_by_szn = {}
+    top_rb_by_szn = {}
+    top_wr_by_szn = {}
+    top_te_by_szn = {}
+    
     if not box_df.empty:
         slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
         name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
         pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+        pos_c = 'Position' if 'Position' in box_df.columns else ('Pos' if 'Pos' in box_df.columns else slot_c)
         
         if slot_c in box_df.columns and name_c in box_df.columns and pts_c in box_df.columns:
             eligible_games = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name']].copy()
@@ -416,21 +421,31 @@ with tab1:
             
             if not counted_box.empty:
                 counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
+                counted_box['Clean_Pos'] = counted_box[pos_c].astype(str).str.strip().str.upper()
                 
-                # All-Time Leader
+                # Overall All-Time Franchise Leading Scorer
                 player_totals = counted_box.groupby(name_c)[pts_c].sum().reset_index()
                 if not player_totals.empty:
                     top_player_row = player_totals.sort_values(pts_c, ascending=False).iloc[0]
                     top_player_str = f"{top_player_row[name_c]} ({top_player_row[pts_c]:,.1f} pts)"
                 
-                # Year-over-Year Leaders
-                szn_player_pts = counted_box.groupby(['Season', name_c])[pts_c].sum().reset_index()
-                szn_player_pts = szn_player_pts.sort_values(['Season', pts_c], ascending=[True, False])
-                top_per_szn = szn_player_pts.drop_duplicates(subset=['Season'], keep='first')
-                top_scorers_by_szn = dict(zip(
-                    top_per_szn['Season'],
-                    top_per_szn.apply(lambda r: f"{r[name_c]} ({r[pts_c]:,.1f})", axis=1)
-                ))
+                # Per-Position Leaders Per Season
+                def get_top_by_pos(target_pos):
+                    pos_df = counted_box[counted_box['Clean_Pos'] == target_pos]
+                    if pos_df.empty:
+                        return {}
+                    szn_pts = pos_df.groupby(['Season', name_c])[pts_c].sum().reset_index()
+                    szn_pts = szn_pts.sort_values(['Season', pts_c], ascending=[True, False])
+                    top_per_szn = szn_pts.drop_duplicates(subset=['Season'], keep='first')
+                    return dict(zip(
+                        top_per_szn['Season'],
+                        top_per_szn.apply(lambda r: f"{r[name_c]} ({r[pts_c]:,.1f})", axis=1)
+                    ))
+                
+                top_qb_by_szn = get_top_by_pos('QB')
+                top_rb_by_szn = get_top_by_pos('RB')
+                top_wr_by_szn = get_top_by_pos('WR')
+                top_te_by_szn = get_top_by_pos('TE')
             
     st.markdown(f"**Championships:** {champ_str}")
     st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
@@ -484,17 +499,21 @@ with tab1:
         lambda x: f"{int(x)}{'th' if 11 <= int(x) % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(int(x) % 10, 'th')}" if pd.notnull(x) else ""
     )
     
-    szn_stats['Top Scorer'] = szn_stats['Season'].map(top_scorers_by_szn).fillna("")
+    szn_stats['Top QB'] = szn_stats['Season'].map(top_qb_by_szn).fillna("")
+    szn_stats['Top RB'] = szn_stats['Season'].map(top_rb_by_szn).fillna("")
+    szn_stats['Top WR'] = szn_stats['Season'].map(top_wr_by_szn).fillna("")
+    szn_stats['Top TE'] = szn_stats['Season'].map(top_te_by_szn).fillna("")
     
-    display_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Top Scorer', 'Playoff Outcome']
+    display_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Top QB', 'Top RB', 'Top WR', 'Top TE', 'Playoff Outcome']
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
     styled_html = display_df.style.hide(axis='index').set_properties(**{
         'text-align': 'center',
-        'padding': '8px',
-        'border': '1px solid #e6e6e6'
+        'padding': '6px 8px',
+        'border': '1px solid #e6e6e6',
+        'white-space': 'nowrap'
     }).set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '8px'), ('border', '1px solid #e6e6e6')]},
+        {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
         {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
     ]).to_html()
     
