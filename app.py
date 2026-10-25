@@ -280,7 +280,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         else:
             st.markdown("#### Opponent Matchup Not Found")
 
-st.title("🏈 DFFL History Hub")
+st.title("🏈 DFFL Hub")
 
 try:
     games = load_data()
@@ -390,8 +390,9 @@ with tab1:
         if szn >= 2018 and rank <= 2:
             playoff_byes += 1
             
-    # Calculate All-Time Leading NFL Player for Franchise
+    # Calculate All-Time & Per-Season Leading NFL Starters
     top_player_str = "N/A"
+    top_scorers_by_szn = {}
     if not box_df.empty:
         slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
         name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
@@ -400,7 +401,7 @@ with tab1:
         if slot_c in box_df.columns and name_c in box_df.columns and pts_c in box_df.columns:
             eligible_games = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name']].copy()
             eligible_games['Season'] = eligible_games['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
-            eligible_games['Week'] = eligible_games['Week'].astype(int)
+            eligible_games['Week'] = pd.to_numeric(eligible_games['Week'], errors='coerce').fillna(0).astype(int)
             eligible_games['Team_Name'] = eligible_games['Team_Name'].astype(str).str.strip()
             
             box_eligible = box_df[box_df['Team_Name'] == selected_team].copy()
@@ -415,10 +416,21 @@ with tab1:
             
             if not counted_box.empty:
                 counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
+                
+                # All-Time Leader
                 player_totals = counted_box.groupby(name_c)[pts_c].sum().reset_index()
                 if not player_totals.empty:
                     top_player_row = player_totals.sort_values(pts_c, ascending=False).iloc[0]
                     top_player_str = f"{top_player_row[name_c]} ({top_player_row[pts_c]:,.1f} pts)"
+                
+                # Year-over-Year Leaders
+                szn_player_pts = counted_box.groupby(['Season', name_c])[pts_c].sum().reset_index()
+                szn_player_pts = szn_player_pts.sort_values(['Season', pts_c], ascending=[True, False])
+                top_per_szn = szn_player_pts.drop_duplicates(subset=['Season'], keep='first')
+                top_scorers_by_szn = dict(zip(
+                    top_per_szn['Season'],
+                    top_per_szn.apply(lambda r: f"{r[name_c]} ({r[pts_c]:,.1f})", axis=1)
+                ))
             
     st.markdown(f"**Championships:** {champ_str}")
     st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
@@ -472,7 +484,9 @@ with tab1:
         lambda x: f"{int(x)}{'th' if 11 <= int(x) % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(int(x) % 10, 'th')}" if pd.notnull(x) else ""
     )
     
-    display_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome']
+    szn_stats['Top Scorer'] = szn_stats['Season'].map(top_scorers_by_szn).fillna("")
+    
+    display_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Top Scorer', 'Playoff Outcome']
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
     styled_html = display_df.style.hide(axis='index').set_properties(**{
