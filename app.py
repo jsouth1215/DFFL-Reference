@@ -390,7 +390,6 @@ with tab1:
         if szn >= 2018 and rank <= 2:
             playoff_byes += 1
             
-    # Calculate All-Time & Per-Season Leading NFL Starters by Position
     top_player_str = "N/A"
     top_qb_by_szn = {}
     top_rb_by_szn = {}
@@ -423,13 +422,11 @@ with tab1:
                 counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
                 counted_box['Clean_Pos'] = counted_box[pos_c].astype(str).str.strip().str.upper()
                 
-                # Overall All-Time Franchise Leading Scorer
                 player_totals = counted_box.groupby(name_c)[pts_c].sum().reset_index()
                 if not player_totals.empty:
                     top_player_row = player_totals.sort_values(pts_c, ascending=False).iloc[0]
                     top_player_str = f"{top_player_row[name_c]} ({top_player_row[pts_c]:,.1f} pts)"
                 
-                # Per-Position Leaders Per Season
                 def get_top_by_pos(target_pos):
                     pos_df = counted_box[counted_box['Clean_Pos'] == target_pos]
                     if pos_df.empty:
@@ -610,21 +607,72 @@ with tab2:
         else:
             st.markdown(f"**Series tied {w}-{l}-{t}**")
             
-        st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
+        if (pw + pl + pt) == 0:
+            st.markdown("**Playoff Record:** No playoff matchups have occurred")
+        elif pw > pl:
+            st.markdown(f"**Playoff Record:** {team_a} leads series {pw}-{pl}-{pt}")
+        elif pl > pw:
+            st.markdown(f"**Playoff Record:** {team_b} leads series {pl}-{pw}-{pt}")
+        else:
+            st.markdown(f"**Playoff Record:** Series tied {pw}-{pl}-{pt}")
+            
         st.divider()
         
         display_h2h = h2h_games.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).copy()
-        display_h2h['Season'] = display_h2h['Season'].astype(str).str.replace('.0', '', regex=False)
+        display_h2h['Season_Str'] = display_h2h['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+        display_h2h['Season'] = display_h2h['Season_Str']
         display_h2h['Winner'] = display_h2h.apply(lambda x: x['Team_Name'] if x['W'] == 1 else (x['Opponent_Team_Name'] if x['L'] == 1 else 'Tie'), axis=1)
         display_h2h['Type'] = display_h2h['Game_Type'].map({1: 'Regular Season', 2: 'Playoffs'}).fillna(display_h2h['Game_Type_Str'])
         
-        display_h2h = display_h2h.rename(columns={'Actual_Points': f'{team_a} Pts', 'Opp_Points': f'{team_b} Pts'})
-        display_h2h[f'{team_a} Pts'] = display_h2h[f'{team_a} Pts'].round(1).astype(str)
-        display_h2h[f'{team_b} Pts'] = display_h2h[f'{team_b} Pts'].round(1).astype(str)
-        display_h2h['Margin'] = display_h2h['Margin'].round(1).astype(str)
+        display_h2h[f'{team_a} Pts'] = display_h2h['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        display_h2h[f'{team_b} Pts'] = display_h2h['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+        display_h2h['Margin'] = display_h2h['Margin'].apply(lambda x: f"{float(x):.1f}")
         
-        cols = ['Season', 'Week', 'Type', 'Winner', f'{team_a} Pts', f'{team_b} Pts', 'Margin']
-        h2h_styled_html = display_h2h[cols].style.hide(axis='index').set_properties(**{
+        if not box_df.empty:
+            slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
+            name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
+            pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+            
+            b_clean = box_df.copy()
+            b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+            b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
+            b_clean['Team_Str'] = b_clean['Team_Name'].astype(str).str.strip()
+            b_clean[pts_c] = pd.to_numeric(b_clean[pts_c], errors='coerce').fillna(0)
+            
+            is_starter = ~b_clean[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+            starters_box = b_clean[is_starter]
+            
+            top_starters = starters_box.sort_values(pts_c, ascending=False).drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
+            top_starters['Player_Label'] = top_starters.apply(lambda r: f"{r[name_c]} ({r[pts_c]:.1f})", axis=1)
+            
+            game_top_map = dict(zip(
+                zip(top_starters['Season_Str'], top_starters['Week_Num'], top_starters['Team_Str']),
+                top_starters['Player_Label']
+            ))
+        else:
+            game_top_map = {}
+            
+        display_h2h[f'{team_a} Top Scorer'] = display_h2h.apply(
+            lambda r: game_top_map.get((r['Season_Str'], int(r['Week_Num']), str(team_a).strip()), ""), axis=1
+        )
+        display_h2h[f'{team_b} Top Scorer'] = display_h2h.apply(
+            lambda r: game_top_map.get((r['Season_Str'], int(r['Week_Num']), str(team_b).strip()), ""), axis=1
+        )
+        
+        cols = ['Season', 'Week', 'Type', 'Winner', f'{team_a} Pts', f'{team_b} Pts', 'Margin', f'{team_a} Top Scorer', f'{team_b} Top Scorer']
+        disp_table = display_h2h[cols]
+        
+        def highlight_winners(row):
+            styles = ['' for _ in row.index]
+            col_a_idx = row.index.get_loc(f'{team_a} Pts')
+            col_b_idx = row.index.get_loc(f'{team_b} Pts')
+            if row['Winner'] == team_a:
+                styles[col_a_idx] = 'font-weight: bold;'
+            elif row['Winner'] == team_b:
+                styles[col_b_idx] = 'font-weight: bold;'
+            return styles
+        
+        h2h_styled_html = disp_table.style.hide(axis='index').apply(highlight_winners, axis=1).set_properties(**{
             'text-align': 'center',
             'padding': '6px 8px',
             'border': '1px solid #e6e6e6',
