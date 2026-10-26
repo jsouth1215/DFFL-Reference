@@ -225,7 +225,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         st.warning("Player data not found. Please ensure 'espn_fantasy_complete_stats_2017_2026.xlsx' is located in this folder.")
         return
         
-    b_szn_str = str(b_season).replace(r'\.0$', '', regex=True).strip()
+    b_szn_str = str(b_season).replace('.0', '').strip()
     b_wk_int = int(b_week)
     b_team_clean = str(b_team).strip().lower()
     
