@@ -613,19 +613,22 @@ with tab1:
                 top_wr_by_szn = get_top_by_pos('WR')
                 top_te_by_szn = get_top_by_pos('TE')
             
-    st.markdown(f"**Championships:** {champ_str}")
-    st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
-    st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
-    st.markdown(f"**Playoff Appearances:** {playoff_apps}")
-    st.markdown(f"**Playoff Byes:** {playoff_byes}")
-    st.markdown(f"**Weekly Bags Won:** {high_scorer_count}")
-    st.markdown(f"**Highest Game:** {high_score_str}")
-    st.markdown(f"**Lowest Game:** {low_score_str}")
-    st.markdown(f"**All-Time Top Scorer:** {top_player_str}")
-    st.markdown(f"**Easiest Opponent:** {easiest_str}")
-    st.markdown(f"**Toughest Opponent:** {toughest_str}")
-    st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
-    st.markdown(f"**Longest Losing Streak:** {longest_l} games ({l_span})")
+    c_stat1, c_stat2 = st.columns(2)
+    with c_stat1:
+        st.markdown(f"**Championships:** {champ_str}")
+        st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
+        st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
+        st.markdown(f"**Playoff Appearances:** {playoff_apps}")
+        st.markdown(f"**Playoff Byes:** {playoff_byes}")
+        st.markdown(f"**Weekly Bags Won:** {high_scorer_count}")
+        st.markdown(f"**All-Time Top Scorer:** {top_player_str}")
+    with c_stat2:
+        st.markdown(f"**Highest Game:** {high_score_str}")
+        st.markdown(f"**Lowest Game:** {low_score_str}")
+        st.markdown(f"**Easiest Opponent:** {easiest_str}")
+        st.markdown(f"**Toughest Opponent:** {toughest_str}")
+        st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
+        st.markdown(f"**Longest Losing Streak:** {longest_l} games ({l_span})")
     st.divider()
     
     st.write("### Season-by-Season (Regular Season)")
@@ -700,6 +703,60 @@ with tab1:
             display_box_score(po_row['Season'], po_row['Week'], selected_team, box_df, games)
     else:
         st.write("No playoff appearances on record.")
+        
+    st.divider()
+    st.write("### Head-to-Head vs. All Opponents")
+    all_opponents = sorted([t for t in teams if t != selected_team])
+    h2h_summary_list = []
+    for opp in all_opponents:
+        opp_games = games[(games['Team_Name'] == selected_team) & (games['Opponent_Team_Name'] == opp) & (games['Game_Type'].isin([1, 2]))]
+        if opp_games.empty:
+            continue
+        tot_w = int(opp_games['W'].sum())
+        tot_l = int(opp_games['L'].sum())
+        tot_t = int(opp_games['T'].sum())
+        tot_g = tot_w + tot_l + tot_t
+        win_p = tot_w / tot_g if tot_g > 0 else 0.0
+        win_p_str = f"{win_p:.3f}".replace("0.", ".", 1) if win_p < 1 else f"{win_p:.3f}"
+        pf_sum = int(round(opp_games['Actual_Points'].sum()))
+        pa_sum = int(round(opp_games['Opp_Points'].sum()))
+        
+        po_g = opp_games[opp_games['Game_Type'] == 2]
+        po_w = int(po_g['W'].sum())
+        po_l = int(po_g['L'].sum())
+        po_t = int(po_g['T'].sum())
+        if (po_w + po_l + po_t) > 0:
+            po_rec_str = f"{po_w}-{po_l}-{po_t}" if po_t > 0 else f"{po_w}-{po_l}"
+        else:
+            po_rec_str = "-"
+            
+        row_dict = {
+            'Opponent': opp,
+            'GP': tot_g,
+            'W': tot_w,
+            'L': tot_l,
+            'T': tot_t,
+            'Win_Pct_Raw': win_p,
+            'Win %': win_p_str,
+            'PF': pf_sum,
+            'PA': pa_sum,
+            'Playoff Record': po_rec_str
+        }
+        h2h_summary_list.append(row_dict)
+        
+    if h2h_summary_list:
+        h2h_summary_df = pd.DataFrame(h2h_summary_list)
+        h2h_summary_df = h2h_summary_df.sort_values(['Win_Pct_Raw', 'W', 'GP'], ascending=[False, False, False]).reset_index(drop=True)
+        
+        has_ties = (h2h_summary_df['T'] > 0).any()
+        if has_ties:
+            disp_h2h_cols = ['Opponent', 'GP', 'W', 'L', 'T', 'Win %', 'PF', 'PA', 'Playoff Record']
+        else:
+            disp_h2h_cols = ['Opponent', 'GP', 'W', 'L', 'Win %', 'PF', 'PA', 'Playoff Record']
+            
+        render_html_table(h2h_summary_df[disp_h2h_cols])
+    else:
+        st.write("No head-to-head matchup history found.")
 
 with tab5:
     col1, col2 = st.columns(2)
@@ -783,10 +840,12 @@ with tab6:
             display_box_score(b_season, b_week, b_team, box_df, games)
 
 with tab2:
-    col1, col2 = st.columns(2)
-    team_a = col1.selectbox("Team A", teams)
-    team_b = col2.selectbox("Team B", [t for t in teams if t != team_a])
-    
+    top_col1, top_col2 = st.columns(2)
+    with top_col1:
+        team_a = st.selectbox("Team A", teams)
+        avail_opps = [t for t in teams if t != team_a]
+        team_b = st.selectbox("Team B", avail_opps)
+        
     h2h_games = games[(games['Team_Name'] == team_a) & (games['Opponent_Team_Name'] == team_b) & (games['Game_Type'].isin([1, 2]))].copy()
     if not h2h_games.empty:
         w, l, t = h2h_games['W'].sum(), h2h_games['L'].sum(), h2h_games['T'].sum()
@@ -794,23 +853,24 @@ with tab2:
         po_h2h = h2h_games[h2h_games['Game_Type'] == 2]
         pw, pl, pt = po_h2h['W'].sum(), po_h2h['L'].sum(), po_h2h['T'].sum()
         
-        st.write(f"### {team_a} vs. {team_b}")
-        if w > l:
-            st.markdown(f"**{team_a} leads series {w}-{l}-{t}**")
-        elif l > w:
-            st.markdown(f"**{team_b} leads series {l}-{w}-{t}**")
-        else:
-            st.markdown(f"**Series tied {w}-{l}-{t}**")
-            
-        if (pw + pl + pt) == 0:
-            st.markdown("**Playoff Record:** No playoff matchups have occurred")
-        elif pw > pl:
-            st.markdown(f"**Playoff Record:** {team_a} leads series {pw}-{pl}-{pt}")
-        elif pl > pw:
-            st.markdown(f"**Playoff Record:** {team_b} leads series {pl}-{pw}-{pt}")
-        else:
-            st.markdown(f"**Playoff Record:** Series tied {pw}-{pl}-{pt}")
-            
+        with top_col2:
+            st.write(f"### {team_a} vs. {team_b}")
+            if w > l:
+                st.markdown(f"**Series Leader:** {team_a} leads {w}-{l}-{t}" if t > 0 else f"**Series Leader:** {team_a} leads {w}-{l}")
+            elif l > w:
+                st.markdown(f"**Series Leader:** {team_b} leads {l}-{w}-{t}" if t > 0 else f"**Series Leader:** {team_b} leads {l}-{w}")
+            else:
+                st.markdown(f"**Series Leader:** Tied {w}-{l}-{t}" if t > 0 else f"**Series Leader:** Tied {w}-{l}")
+                
+            if (pw + pl + pt) == 0:
+                st.markdown("**Playoff Record:** No playoff matchups have occurred")
+            elif pw > pl:
+                st.markdown(f"**Playoff Record:** {team_a} leads {pw}-{pl}-{pt}" if pt > 0 else f"**Playoff Record:** {team_a} leads {pw}-{pl}")
+            elif pl > pw:
+                st.markdown(f"**Playoff Record:** {team_b} leads {pl}-{pw}-{pt}" if pt > 0 else f"**Playoff Record:** {team_b} leads {pl}-{pw}")
+            else:
+                st.markdown(f"**Playoff Record:** Tied {pw}-{pl}-{pt}" if pt > 0 else f"**Playoff Record:** Tied {pw}-{pl}")
+                
         st.divider()
         
         display_h2h = h2h_games.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).copy()
@@ -929,11 +989,11 @@ with tab4:
     elif record_type == "Bottom 2 Matchups":
         if 'Bottom_2_Game' in games.columns:
             bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
-            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
+            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
             bot2['Season'] = bot2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             bot2['Actual_Points'] = bot2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
             bot2['Opp_Points'] = bot2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
             bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
             bot2 = bot2.rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'})
             render_html_table(bot2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
-        
+    
