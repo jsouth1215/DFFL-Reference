@@ -720,6 +720,107 @@ with tab2:
             lambda r: game_top_map.get((r['Season_Str'], int(r['Week_Num']), str(team_b).strip()), ""), axis=1
         )
         
+        display_h2h['Game_Label'] = display_h2h.apply(
+            lambda r: f"{r['Season']} Week {r['Week']} ({r['Type']})", axis=1
+        )
+        
+        selected_h2h_label = st.selectbox(
+            "Select Matchup to Inspect:",
+            display_h2h['Game_Label'].tolist(),
+            key="h2h_game_select"
+        )
+        
+        if selected_h2h_label:
+            sel_row = display_h2h[display_h2h['Game_Label'] == selected_h2h_label].iloc[0]
+            sel_szn_str = sel_row['Season_Str']
+            sel_szn_num = float(sel_row['Season_Num'])
+            sel_wk_num = int(sel_row['Week_Num'])
+            sel_gt = int(sel_row['Game_Type'])
+            sel_gt_str = sel_row['Type']
+            
+            score_a_val = float(sel_row['Actual_Points'])
+            score_b_val = float(sel_row['Opp_Points'])
+            
+            bold_a = "font-weight: 800; color: #111;" if score_a_val > score_b_val else ("font-weight: 500; color: #555;" if score_b_val > score_a_val else "font-weight: 700; color: #111;")
+            bold_b = "font-weight: 800; color: #111;" if score_b_val > score_a_val else ("font-weight: 500; color: #555;" if score_a_val > score_b_val else "font-weight: 700; color: #111;")
+            
+            # Team A season record through that game
+            mask_a_szn = (
+                (games['Team_Name'] == team_a) &
+                (games['Season'] == sel_szn_str) &
+                (games['Game_Type'].isin([1, 2])) &
+                ((games['Game_Type'] < sel_gt) | ((games['Game_Type'] == sel_gt) & (games['Week_Num'] <= sel_wk_num)))
+            )
+            g_a_thru = games[mask_a_szn]
+            rec_a_w, rec_a_l, rec_a_t = g_a_thru['W'].sum(), g_a_thru['L'].sum(), g_a_thru['T'].sum()
+            rec_a_str = f"{rec_a_w}-{rec_a_l}-{rec_a_t}" if rec_a_t > 0 else f"{rec_a_w}-{rec_a_l}"
+            
+            # Team B season record through that game
+            mask_b_szn = (
+                (games['Team_Name'] == team_b) &
+                (games['Season'] == sel_szn_str) &
+                (games['Game_Type'].isin([1, 2])) &
+                ((games['Game_Type'] < sel_gt) | ((games['Game_Type'] == sel_gt) & (games['Week_Num'] <= sel_wk_num)))
+            )
+            g_b_thru = games[mask_b_szn]
+            rec_b_w, rec_b_l, rec_b_t = g_b_thru['W'].sum(), g_b_thru['L'].sum(), g_b_thru['T'].sum()
+            rec_b_str = f"{rec_b_w}-{rec_b_l}-{rec_b_t}" if rec_b_t > 0 else f"{rec_b_w}-{rec_b_l}"
+            
+            # H2H series record through that game
+            mask_h2h_thru = (
+                (h2h_games['Season_Num'] < sel_szn_num) |
+                ((h2h_games['Season_Num'] == sel_szn_num) & (h2h_games['Game_Type'] < sel_gt)) |
+                ((h2h_games['Season_Num'] == sel_szn_num) & (h2h_games['Game_Type'] == sel_gt) & (h2h_games['Week_Num'] <= sel_wk_num))
+            )
+            g_h2h_thru = h2h_games[mask_h2h_thru]
+            thru_w, thru_l, thru_t = g_h2h_thru['W'].sum(), g_h2h_thru['L'].sum(), g_h2h_thru['T'].sum()
+            if thru_w > thru_l:
+                h2h_thru_str = f"{team_a} leads series {thru_w}-{thru_l}" + (f"-{thru_t}" if thru_t > 0 else "")
+            elif thru_l > thru_w:
+                h2h_thru_str = f"{team_b} leads series {thru_l}-{thru_w}" + (f"-{thru_t}" if thru_t > 0 else "")
+            else:
+                h2h_thru_str = f"Series tied {thru_w}-{thru_l}" + (f"-{thru_t}" if thru_t > 0 else "")
+                
+            header_html = f"""
+            <div style="background-color: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 8px; padding: 14px 20px; margin: 10px 0 20px 0; text-align: center;">
+                <div style="font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">
+                    {sel_szn_str} &bull; Week {sel_wk_num} &bull; {sel_gt_str}
+                </div>
+                <div style="display: flex; justify-content: center; align-items: flex-start; gap: 50px; margin-bottom: 8px;">
+                    <div style="min-width: 140px; text-align: center;">
+                        <div style="font-size: 17px; font-weight: 600; color: #0d6efd; text-decoration: underline; margin-bottom: 2px;">
+                            {team_a}
+                        </div>
+                        <div style="font-size: 34px; {bold_a}; line-height: 1.1;">
+                            {score_a_val:.1f}
+                        </div>
+                        <div style="font-size: 14px; font-weight: 500; color: #495057; margin-top: 2px;">
+                            {rec_a_str}
+                        </div>
+                    </div>
+                    <div style="min-width: 140px; text-align: center;">
+                        <div style="font-size: 17px; font-weight: 600; color: #0d6efd; text-decoration: underline; margin-bottom: 2px;">
+                            {team_b}
+                        </div>
+                        <div style="font-size: 34px; {bold_b}; line-height: 1.1;">
+                            {score_b_val:.1f}
+                        </div>
+                        <div style="font-size: 14px; font-weight: 500; color: #495057; margin-top: 2px;">
+                            {rec_b_str}
+                        </div>
+                    </div>
+                </div>
+                <div style="font-size: 13px; font-weight: 600; color: #495057; border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 6px; display: inline-block;">
+                    H2H Series through this game: {h2h_thru_str}
+                </div>
+            </div>
+            """
+            st.markdown(header_html, unsafe_allow_html=True)
+            
+            with st.expander("View Box Score for this Matchup", expanded=False):
+                display_box_score(sel_szn_str, sel_wk_num, team_a, box_df, games)
+        
+        st.write("### All-Time Head-to-Head History")
         cols = ['Season', 'Week', 'Type', 'Winner', f'{team_a} Pts', f'{team_b} Pts', 'Margin', f'{team_a} Top Scorer', f'{team_b} Top Scorer']
         disp_table = display_h2h[cols]
         
