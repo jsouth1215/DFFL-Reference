@@ -19,7 +19,7 @@ def get_game_top_scorers(box_df):
     pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
     
     b_clean = box_df.copy()
-    b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+    b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
     b_clean['Team_Str'] = b_clean['Team_Name'].astype(str).str.strip()
     b_clean[pts_c] = pd.to_numeric(b_clean[pts_c], errors='coerce').fillna(0)
@@ -65,7 +65,7 @@ def load_rs_rankings(file_path, teams_list):
             
             ranks_df = data[['Team_Name'] + year_cols].copy()
             ranks_melt = ranks_df.melt(id_vars='Team_Name', var_name='Season', value_name='RS_Rank')
-            ranks_melt['Season'] = ranks_melt['Season'].astype(str).str.replace('.0', '', regex=False)
+            ranks_melt['Season'] = ranks_melt['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             ranks_melt['RS_Rank'] = pd.to_numeric(ranks_melt['RS_Rank'], errors='coerce')
             ranks_melt = ranks_melt.dropna(subset=['RS_Rank'])
             ranks_melt['Team_Name'] = ranks_melt['Team_Name'].astype(str).str.strip()
@@ -112,6 +112,7 @@ def load_data():
     games = games.dropna(subset=['Team_Name', 'Actual_Points'])
     games = games[~((games['Actual_Points'] == 0) & (games['Opp_Points'] == 0))]
     
+    games['Season'] = games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     games = games[games['Team_Name'].str.upper() != 'BYE']
     
     def map_game_type(row):
@@ -208,7 +209,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
     b_team_clean = str(b_team).strip().lower()
     
     match_mask = (
-        (games['Season'].astype(str).str.replace('.0', '', regex=False).str.strip() == b_szn_str) &
+        (games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == b_szn_str) &
         (games['Week_Num'] == b_wk_int) &
         (games['Team_Name'].astype(str).str.strip().str.lower() == b_team_clean)
     )
@@ -223,8 +224,8 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         team_pts = 0.0
         opp_pts = 0.0
         
-    team_roster = box_df[(box_df['Season'].astype(str).str.replace('.0','') == b_szn_str) & (box_df['Week'] == b_wk_int) & (box_df['Team_Name'] == b_team)].copy()
-    opp_roster = box_df[(box_df['Season'].astype(str).str.replace('.0','') == b_szn_str) & (box_df['Week'] == b_wk_int) & (box_df['Team_Name'] == opp_name)].copy()
+    team_roster = box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == b_szn_str) & (box_df['Week'] == b_wk_int) & (box_df['Team_Name'] == b_team)].copy()
+    opp_roster = box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == b_szn_str) & (box_df['Week'] == b_wk_int) & (box_df['Team_Name'] == opp_name)].copy()
     
     if team_roster.empty and opp_roster.empty:
         st.info(f"No player-level box score data available for {b_szn_str} Week {b_wk_int}.")
@@ -312,8 +313,14 @@ try:
     box_df = load_box_scores()
     game_top_map = get_game_top_scorers(box_df)
     
-    teams_list = sorted(games['Team_Name'].dropna().unique().tolist())
-    rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams_list)
+    teams = sorted(games['Team_Name'].dropna().unique().tolist())
+    seasons_list = sorted(
+        games['Season'].dropna().unique().tolist(),
+        key=lambda x: int(x) if str(x).isdigit() else 0,
+        reverse=True
+    )
+    
+    rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams)
     
     if rs_ranks_df.empty:
         reg = games[games['Game_Type'] == 1]
@@ -323,15 +330,13 @@ try:
         szn_st['RS_Rank'] = szn_st.groupby('Season').cumcount() + 1
         rs_ranks_df = szn_st[['Season', 'Team_Name', 'RS_Rank']].copy()
         
-    rs_ranks_df['Season'] = rs_ranks_df['Season'].astype(str).str.replace('.0', '', regex=False)
+    rs_ranks_df['Season'] = rs_ranks_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 
 except Exception as e:
     st.error(f"Could not load data. Error: {e}")
     st.stop()
 
 tab1, tab5, tab6, tab2, tab3, tab4 = st.tabs(["Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records"])
-teams = sorted(games['Team_Name'].dropna().unique().tolist())
-seasons_list = sorted(games['Season'].unique().tolist(), reverse=True)
 
 with tab1:
     selected_team = st.selectbox("Select Manager", teams, label_visibility="collapsed")
@@ -430,12 +435,12 @@ with tab1:
         
         if slot_c in box_df.columns and name_c in box_df.columns and pts_c in box_df.columns:
             eligible_games = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name']].copy()
-            eligible_games['Season'] = eligible_games['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+            eligible_games['Season'] = eligible_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             eligible_games['Week'] = pd.to_numeric(eligible_games['Week'], errors='coerce').fillna(0).astype(int)
             eligible_games['Team_Name'] = eligible_games['Team_Name'].astype(str).str.strip()
             
             box_eligible = box_df[box_df['Team_Name'] == selected_team].copy()
-            box_eligible['Season'] = box_eligible['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+            box_eligible['Season'] = box_eligible['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             box_eligible['Week'] = pd.to_numeric(box_eligible['Week'], errors='coerce').fillna(0).astype(int)
             box_eligible['Team_Name'] = box_eligible['Team_Name'].astype(str).str.strip()
             
@@ -511,14 +516,14 @@ with tab1:
         outcomes.append(get_playoff_outcome(s_playoffs))
     szn_stats['Playoff Outcome'] = outcomes
     
-    szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace('.0', '', regex=False)
+    szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     
-    mgr_games['Season_Str'] = mgr_games['Season'].astype(str).str.replace('.0', '', regex=False)
+    mgr_games['Season_Str'] = mgr_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     bags_per_szn = mgr_games.groupby('Season_Str')['Is_High_Scorer'].sum().to_dict()
     szn_stats['Weekly Bags'] = szn_stats['Season'].map(bags_per_szn).fillna(0).astype(int)
     
     rs_team_format = rs_team[['Season', 'RS_Rank']].copy()
-    rs_team_format['Season'] = rs_team_format['Season'].astype(str).str.replace('.0', '', regex=False)
+    rs_team_format['Season'] = rs_team_format['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     
     szn_stats = pd.merge(szn_stats, rs_team_format, on='Season', how='left')
     
@@ -555,7 +560,7 @@ with tab1:
     st.write("### Playoff Game Log")
     display_playoffs = playoffs.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False])
     if not display_playoffs.empty:
-        display_playoffs['Season'] = display_playoffs['Season'].astype(str).str.replace('.0', '', regex=False)
+        display_playoffs['Season'] = display_playoffs['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         display_playoffs['Score'] = display_playoffs['Actual_Points'].round(1).astype(str) + " - " + display_playoffs['Opp_Points'].round(1).astype(str)
         
         po_display_df = display_playoffs[['Season', 'Week', 'Playoff_Round', 'Opponent_Team_Name', 'Result', 'Score']].rename(columns={'Opponent_Team_Name': 'Opponent', 'Playoff_Round': 'Round'})
@@ -584,16 +589,33 @@ with tab5:
     sched_season = col1.selectbox("Season", seasons_list, key='sched_szn')
     sched_team = col2.selectbox("Manager", teams, key='sched_team')
     
-    sched = games[(games['Season'] == sched_season) & (games['Team_Name'] == sched_team)].sort_values(['Game_Type', 'Week_Num']).copy()
+    sched = games[(games['Season'] == str(sched_season)) & (games['Team_Name'] == sched_team)].sort_values(['Game_Type', 'Week_Num']).copy()
     if not sched.empty:
         type_mapping = {1: 'Regular Season', 2: 'Playoffs', 3: 'Consolation', 4: 'Playoff Bye'}
         sched['Type'] = sched['Game_Type'].map(type_mapping)
         
         sched['Result'] = sched.apply(lambda x: 'BYE' if x['Game_Type'] == 4 else ('W' if x['W'] else ('L' if x['L'] else 'T')), axis=1)
-        sched['Score'] = sched.apply(
-            lambda x: f"{float(x['Actual_Points']):.1f} - {float(x['Opp_Points']):.1f}" if x['Game_Type'] != 4 else f"{float(x['Actual_Points']):.1f}", axis=1
+        
+        team_score_col = f'{sched_team} Score'
+        opp_score_col = 'Opponent Score'
+        
+        sched[team_score_col] = sched['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        sched[opp_score_col] = sched.apply(
+            lambda x: f"{float(x['Opp_Points']):.1f}" if x['Game_Type'] != 4 else "-", axis=1
         )
-        sched['Margin'] = sched.apply(lambda x: f"{float(x['Margin']):.1f}" if x['Game_Type'] != 4 else "-", axis=1)
+        
+        def calc_rel_margin(r):
+            if r['Game_Type'] == 4:
+                return "-"
+            diff = r['Actual_Points'] - r['Opp_Points']
+            if diff > 0:
+                return f"+{diff:.1f}"
+            elif diff < 0:
+                return f"{diff:.1f}"
+            else:
+                return "0.0"
+                
+        sched['Margin'] = sched.apply(calc_rel_margin, axis=1)
         sched['Opponent'] = sched['Opponent_Team_Name']
         
         s_szn_str = str(sched_season).replace('.0', '').strip()
@@ -608,9 +630,20 @@ with tab5:
             lambda r: game_top_map.get((s_szn_str, r['Week_Num_Int'], r['Opp_Str']), "") if r['Opp_Str'].upper() != 'BYE' else "", axis=1
         )
         
-        cols = ['Week', 'Type', 'Opponent', 'Result', 'Score', 'Margin', f'{sched_team} Top Scorer', 'Opponent Top Scorer']
+        cols = ['Week', 'Type', 'Opponent', 'Result', team_score_col, opp_score_col, 'Margin', f'{sched_team} Top Scorer', 'Opponent Top Scorer']
+        disp_sched = sched[cols]
         
-        sched_styled_html = sched[cols].style.hide(axis='index').set_properties(**{
+        def highlight_sched_winners(row):
+            styles = ['' for _ in row.index]
+            col_team_idx = row.index.get_loc(team_score_col)
+            col_opp_idx = row.index.get_loc(opp_score_col)
+            if row['Result'] == 'W':
+                styles[col_team_idx] = 'font-weight: bold;'
+            elif row['Result'] == 'L':
+                styles[col_opp_idx] = 'font-weight: bold;'
+            return styles
+        
+        sched_styled_html = disp_sched.style.hide(axis='index').apply(highlight_sched_winners, axis=1).set_properties(**{
             'text-align': 'center',
             'padding': '6px 8px',
             'border': '1px solid #e6e6e6',
@@ -674,7 +707,7 @@ with tab2:
         st.divider()
         
         display_h2h = h2h_games.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).copy()
-        display_h2h['Season_Str'] = display_h2h['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+        display_h2h['Season_Str'] = display_h2h['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         display_h2h['Season'] = display_h2h['Season_Str']
         display_h2h['Winner'] = display_h2h.apply(lambda x: x['Team_Name'] if x['W'] == 1 else (x['Opponent_Team_Name'] if x['L'] == 1 else 'Tie'), axis=1)
         display_h2h['Type'] = display_h2h['Game_Type'].map({1: 'Regular Season', 2: 'Playoffs'}).fillna(display_h2h['Game_Type_Str'])
@@ -719,7 +752,7 @@ with tab2:
 
 with tab3:
     selected_season = st.selectbox("Select Season", seasons_list, key='stnd_szn')
-    szn_data = games[(games['Season'] == selected_season) & (games['Game_Type'] == 1)]
+    szn_data = games[(games['Season'] == str(selected_season)) & (games['Game_Type'] == 1)]
     
     if not szn_data.empty:
         max_week = int(szn_data['Week_Num'].max())
@@ -745,35 +778,35 @@ with tab4:
     
     if record_type == "Highest Scoring Weeks":
         top_scores = games[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=False).head(15)
-        top_scores['Season'] = top_scores['Season'].astype(str).str.replace('.0', '', regex=False)
+        top_scores['Season'] = top_scores['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         st.dataframe(top_scores, use_container_width=True, hide_index=True)
         
     elif record_type == "Lowest Scoring Weeks":
         low_scores = games[games['Actual_Points'] > 0][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=True).head(15)
-        low_scores['Season'] = low_scores['Season'].astype(str).str.replace('.0', '', regex=False)
+        low_scores['Season'] = low_scores['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         st.dataframe(low_scores, use_container_width=True, hide_index=True)
         
     elif record_type == "Biggest Blowouts":
         blowouts = games[(games['W'] == 1) & (games['Game_Type'] != 4)][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=False).head(15)
-        blowouts['Season'] = blowouts['Season'].astype(str).str.replace('.0', '', regex=False)
+        blowouts['Season'] = blowouts['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         st.dataframe(blowouts, use_container_width=True, hide_index=True)
         
     elif record_type == "Closest Games":
         closest = games[(games['W'] == 1) & (games['Margin'] > 0) & (games['Game_Type'] != 4)][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=True).head(15)
-        closest['Season'] = closest['Season'].astype(str).str.replace('.0', '', regex=False)
+        closest['Season'] = closest['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         st.dataframe(closest, use_container_width=True, hide_index=True)
         
     elif record_type == "Top 2 Matchups":
         if 'Top_2_Game' in games.columns:
             top2_mask = games['Top_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
             top2 = games[top2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
-            top2['Season'] = top2['Season'].astype(str).str.replace('.0', '', regex=False)
+            top2['Season'] = top2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             st.dataframe(top2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}), use_container_width=True, hide_index=True)
         
     elif record_type == "Bottom 2 Matchups":
         if 'Bottom_2_Game' in games.columns:
             bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
             bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
-            bot2['Season'] = bot2['Season'].astype(str).str.replace('.0', '', regex=False)
+            bot2['Season'] = bot2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             st.dataframe(bot2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}), use_container_width=True, hide_index=True)
             
