@@ -11,6 +11,31 @@ def load_box_scores():
         return pd.DataFrame()
 
 @st.cache_data
+def get_game_top_scorers(box_df):
+    if box_df.empty:
+        return {}
+    slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
+    name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
+    pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+    
+    b_clean = box_df.copy()
+    b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
+    b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
+    b_clean['Team_Str'] = b_clean['Team_Name'].astype(str).str.strip()
+    b_clean[pts_c] = pd.to_numeric(b_clean[pts_c], errors='coerce').fillna(0)
+    
+    is_starter = ~b_clean[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+    starters_box = b_clean[is_starter]
+    
+    top_starters = starters_box.sort_values(pts_c, ascending=False).drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
+    top_starters['Player_Label'] = top_starters.apply(lambda r: f"{r[name_c]} ({r[pts_c]:.1f})", axis=1)
+    
+    return dict(zip(
+        zip(top_starters['Season_Str'], top_starters['Week_Num'], top_starters['Team_Str']),
+        top_starters['Player_Label']
+    ))
+
+@st.cache_data
 def load_rs_rankings(file_path, teams_list):
     try:
         df = pd.read_excel(file_path, sheet_name="All Time W-L", engine="pyxlsb", header=None)
@@ -285,6 +310,7 @@ st.title("🏈 DFFL History Hub")
 try:
     games = load_data()
     box_df = load_box_scores()
+    game_top_map = get_game_top_scorers(box_df)
     
     teams_list = sorted(games['Team_Name'].dropna().unique().tolist())
     rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams_list)
@@ -564,8 +590,37 @@ with tab5:
         sched['Type'] = sched['Game_Type'].map(type_mapping)
         
         sched['Result'] = sched.apply(lambda x: 'BYE' if x['Game_Type'] == 4 else ('W' if x['W'] else ('L' if x['L'] else 'T')), axis=1)
-        sched['Score'] = sched['Actual_Points'].round(1).astype(str) + " - " + sched['Opp_Points'].round(1).astype(str)
-        st.dataframe(sched[['Week', 'Type', 'Opponent_Team_Name', 'Result', 'Score', 'Margin']].rename(columns={'Opponent_Team_Name': 'Opponent'}), use_container_width=True, hide_index=True)
+        sched['Score'] = sched.apply(
+            lambda x: f"{float(x['Actual_Points']):.1f} - {float(x['Opp_Points']):.1f}" if x['Game_Type'] != 4 else f"{float(x['Actual_Points']):.1f}", axis=1
+        )
+        sched['Margin'] = sched.apply(lambda x: f"{float(x['Margin']):.1f}" if x['Game_Type'] != 4 else "-", axis=1)
+        sched['Opponent'] = sched['Opponent_Team_Name']
+        
+        s_szn_str = str(sched_season).replace('.0', '').strip()
+        sched['Team_Str'] = sched['Team_Name'].astype(str).str.strip()
+        sched['Opp_Str'] = sched['Opponent_Team_Name'].astype(str).str.strip()
+        sched['Week_Num_Int'] = pd.to_numeric(sched['Week'], errors='coerce').fillna(0).astype(int)
+        
+        sched[f'{sched_team} Top Scorer'] = sched.apply(
+            lambda r: game_top_map.get((s_szn_str, r['Week_Num_Int'], r['Team_Str']), ""), axis=1
+        )
+        sched['Opponent Top Scorer'] = sched.apply(
+            lambda r: game_top_map.get((s_szn_str, r['Week_Num_Int'], r['Opp_Str']), "") if r['Opp_Str'].upper() != 'BYE' else "", axis=1
+        )
+        
+        cols = ['Week', 'Type', 'Opponent', 'Result', 'Score', 'Margin', f'{sched_team} Top Scorer', 'Opponent Top Scorer']
+        
+        sched_styled_html = sched[cols].style.hide(axis='index').set_properties(**{
+            'text-align': 'center',
+            'padding': '6px 8px',
+            'border': '1px solid #e6e6e6',
+            'white-space': 'nowrap'
+        }).set_table_styles([
+            {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
+            {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
+        ]).to_html()
+        
+        st.markdown(sched_styled_html, unsafe_allow_html=True)
         
         view_sch_wk = st.selectbox("Select Week to View Box Score:", ["Select..."] + sched['Week'].unique().tolist(), key="sch_box")
         if view_sch_wk != "Select...":
@@ -628,30 +683,6 @@ with tab2:
         display_h2h[f'{team_b} Pts'] = display_h2h['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
         display_h2h['Margin'] = display_h2h['Margin'].apply(lambda x: f"{float(x):.1f}")
         
-        if not box_df.empty:
-            slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
-            name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
-            pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
-            
-            b_clean = box_df.copy()
-            b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace('.0', '', regex=False).str.strip()
-            b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
-            b_clean['Team_Str'] = b_clean['Team_Name'].astype(str).str.strip()
-            b_clean[pts_c] = pd.to_numeric(b_clean[pts_c], errors='coerce').fillna(0)
-            
-            is_starter = ~b_clean[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
-            starters_box = b_clean[is_starter]
-            
-            top_starters = starters_box.sort_values(pts_c, ascending=False).drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
-            top_starters['Player_Label'] = top_starters.apply(lambda r: f"{r[name_c]} ({r[pts_c]:.1f})", axis=1)
-            
-            game_top_map = dict(zip(
-                zip(top_starters['Season_Str'], top_starters['Week_Num'], top_starters['Team_Str']),
-                top_starters['Player_Label']
-            ))
-        else:
-            game_top_map = {}
-            
         display_h2h[f'{team_a} Top Scorer'] = display_h2h.apply(
             lambda r: game_top_map.get((r['Season_Str'], int(r['Week_Num']), str(team_a).strip()), ""), axis=1
         )
