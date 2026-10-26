@@ -509,15 +509,31 @@ with tab1:
             if not opp_stats.empty:
                 opp_stats['Win %'] = opp_stats['W'] / opp_stats['Games']
                 
+                def format_opp_record(df_sub):
+                    w = int(df_sub.iloc[0]['W'])
+                    l = int(df_sub.iloc[0]['L'])
+                    t = int(df_sub.iloc[0]['T'])
+                    return f"{w}-{l}-{t}" if t > 0 else f"{w}-{l}"
+
+                # Easiest Opponent: highest Win %, tiebreak on max Games
                 max_wp = opp_stats['Win %'].max()
-                easiest_df = opp_stats[opp_stats['Win %'] == max_wp]
-                easiest_names = ", ".join(easiest_df['Opponent_Team_Name'].tolist())
-                easiest_str = f"{easiest_names} ({max_wp:.3f})".replace("0.", ".", 1) if max_wp < 1 else f"{easiest_names} ({max_wp:.3f})"
+                easiest_candidates = opp_stats[opp_stats['Win %'] == max_wp]
+                max_games_easiest = easiest_candidates['Games'].max()
+                easiest_final = easiest_candidates[easiest_candidates['Games'] == max_games_easiest]
                 
+                easiest_names = ", ".join(easiest_final['Opponent_Team_Name'].tolist())
+                easiest_rec = format_opp_record(easiest_final)
+                easiest_str = f"{easiest_names} ({easiest_rec})"
+                
+                # Toughest Opponent: lowest Win %, tiebreak on max Games
                 min_wp = opp_stats['Win %'].min()
-                toughest_df = opp_stats[opp_stats['Win %'] == min_wp]
-                toughest_names = ", ".join(toughest_df['Opponent_Team_Name'].tolist())
-                toughest_str = f"{toughest_names} ({min_wp:.3f})".replace("0.", ".", 1) if min_wp < 1 else f"{toughest_names} ({min_wp:.3f})"
+                toughest_candidates = opp_stats[opp_stats['Win %'] == min_wp]
+                max_games_toughest = toughest_candidates['Games'].max()
+                toughest_final = toughest_candidates[toughest_candidates['Games'] == max_games_toughest]
+                
+                toughest_names = ", ".join(toughest_final['Opponent_Team_Name'].tolist())
+                toughest_rec = format_opp_record(toughest_final)
+                toughest_str = f"{toughest_names} ({toughest_rec})"
             else:
                 easiest_str = "N/A"
                 toughest_str = "N/A"
@@ -559,7 +575,12 @@ with tab1:
         if szn >= 2018 and rank <= 2:
             playoff_byes += 1
             
-    top_player_str = "N/A"
+    all_time_qb_str = "N/A"
+    all_time_rb_str = "N/A"
+    all_time_wr_str = "N/A"
+    all_time_te_str = "N/A"
+    all_time_dst_str = "N/A"
+    all_time_k_str = "N/A"
     top_qb_by_szn = {}
     top_rb_by_szn = {}
     top_wr_by_szn = {}
@@ -591,11 +612,25 @@ with tab1:
                 counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
                 counted_box['Clean_Pos'] = counted_box[pos_c].astype(str).str.strip().str.upper()
                 
-                player_totals = counted_box.groupby(name_c)[pts_c].sum().reset_index()
-                if not player_totals.empty:
-                    top_player_row = player_totals.sort_values(pts_c, ascending=False).iloc[0]
-                    top_player_str = f"{top_player_row[name_c]} ({top_player_row[pts_c]:,.1f} pts)"
+                # All-Time Leaders by Position
+                def get_all_time_top(target_positions):
+                    pos_df = counted_box[counted_box['Clean_Pos'].isin(target_positions)]
+                    if pos_df.empty:
+                        return "N/A"
+                    p_totals = pos_df.groupby(name_c)[pts_c].sum().reset_index()
+                    if p_totals.empty:
+                        return "N/A"
+                    top_row = p_totals.sort_values(pts_c, ascending=False).iloc[0]
+                    return f"{top_row[name_c]} ({top_row[pts_c]:,.1f} pts)"
                 
+                all_time_qb_str = get_all_time_top(['QB'])
+                all_time_rb_str = get_all_time_top(['RB'])
+                all_time_wr_str = get_all_time_top(['WR'])
+                all_time_te_str = get_all_time_top(['TE'])
+                all_time_dst_str = get_all_time_top(['D/ST', 'DST', 'DEF', 'DP'])
+                all_time_k_str = get_all_time_top(['K', 'PK'])
+                
+                # Season by season leaders
                 def get_top_by_pos(target_pos):
                     pos_df = counted_box[counted_box['Clean_Pos'] == target_pos]
                     if pos_df.empty:
@@ -613,7 +648,7 @@ with tab1:
                 top_wr_by_szn = get_top_by_pos('WR')
                 top_te_by_szn = get_top_by_pos('TE')
             
-    c_stat1, c_stat2 = st.columns(2)
+    c_stat1, c_stat2, c_stat3 = st.columns(3)
     with c_stat1:
         st.markdown(f"**Championships:** {champ_str}")
         st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
@@ -621,14 +656,20 @@ with tab1:
         st.markdown(f"**Playoff Appearances:** {playoff_apps}")
         st.markdown(f"**Playoff Byes:** {playoff_byes}")
         st.markdown(f"**Weekly Bags Won:** {high_scorer_count}")
-        st.markdown(f"**All-Time Top Scorer:** {top_player_str}")
     with c_stat2:
-        st.markdown(f"**Highest Game:** {high_score_str}")
-        st.markdown(f"**Lowest Game:** {low_score_str}")
+        st.markdown(f"**Highest Scoring Game:** {high_score_str}")
+        st.markdown(f"**Lowest Scoring Game:** {low_score_str}")
         st.markdown(f"**Easiest Opponent:** {easiest_str}")
         st.markdown(f"**Toughest Opponent:** {toughest_str}")
         st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
         st.markdown(f"**Longest Losing Streak:** {longest_l} games ({l_span})")
+    with c_stat3:
+        st.markdown(f"**Top Scoring QB:** {all_time_qb_str}")
+        st.markdown(f"**Top Scoring RB:** {all_time_rb_str}")
+        st.markdown(f"**Top Scoring WR:** {all_time_wr_str}")
+        st.markdown(f"**Top Scoring TE:** {all_time_te_str}")
+        st.markdown(f"**Top Scoring D/ST:** {all_time_dst_str}")
+        st.markdown(f"**Top Scoring K:** {all_time_k_str}")
     st.divider()
     
     st.write("### Season-by-Season (Regular Season)")
@@ -747,13 +788,7 @@ with tab1:
     if h2h_summary_list:
         h2h_summary_df = pd.DataFrame(h2h_summary_list)
         h2h_summary_df = h2h_summary_df.sort_values(['Win_Pct_Raw', 'W', 'GP'], ascending=[False, False, False]).reset_index(drop=True)
-        
-        has_ties = (h2h_summary_df['T'] > 0).any()
-        if has_ties:
-            disp_h2h_cols = ['Opponent', 'GP', 'W', 'L', 'T', 'Win %', 'PF', 'PA', 'Playoff Record']
-        else:
-            disp_h2h_cols = ['Opponent', 'GP', 'W', 'L', 'Win %', 'PF', 'PA', 'Playoff Record']
-            
+        disp_h2h_cols = ['Opponent', 'GP', 'W', 'L', 'Win %', 'PF', 'PA', 'Playoff Record']
         render_html_table(h2h_summary_df[disp_h2h_cols])
     else:
         st.write("No head-to-head matchup history found.")
@@ -996,4 +1031,4 @@ with tab4:
             bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
             bot2 = bot2.rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'})
             render_html_table(bot2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
-    
+                    
