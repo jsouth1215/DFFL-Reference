@@ -5,8 +5,6 @@ st.set_page_config(page_title="DFFL Hub", page_icon="🏈", layout="wide")
 
 def render_html_table(df, highlight_fn=None, left_align_cols=None):
     styler = df.style.hide(axis='index')
-    if highlight_fn:
-        styler = styler.apply(highlight_fn, axis=1)
     styler = styler.set_properties(**{
         'text-align': 'center',
         'padding': '6px 8px',
@@ -17,7 +15,9 @@ def render_html_table(df, highlight_fn=None, left_align_cols=None):
         valid_cols = [c for c in left_align_cols if c in df.columns]
         if valid_cols:
             styler = styler.set_properties(subset=valid_cols, **{'text-align': 'left'})
-            
+    if highlight_fn:
+        styler = styler.apply(highlight_fn, axis=1)
+        
     styled_html = styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
         {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
@@ -170,10 +170,21 @@ def get_detailed_streaks(mgr_df):
     
     curr_w, curr_l = 0, 0
     w_start, l_start = None, None
+    prev_season = None
     
     for _, row in mgr_df.iterrows():
-        s, w, res = row['Season'], row['Week'], row['Result']
-        game_label = f"{str(s).replace('.0','')}, W{w}"
+        s = str(row['Season']).replace('.0', '').strip()
+        w = row['Week']
+        res = row['Result']
+        
+        if prev_season is not None and s != prev_season:
+            curr_w = 0
+            curr_l = 0
+            w_start = None
+            l_start = None
+        prev_season = s
+        
+        game_label = f"{s}, W{w}"
         
         if res == 'W':
             if curr_w == 0: w_start = game_label
@@ -509,31 +520,26 @@ with tab1:
             if not opp_stats.empty:
                 opp_stats['Win %'] = opp_stats['W'] / opp_stats['Games']
                 
-                def format_opp_record(df_sub):
-                    w = int(df_sub.iloc[0]['W'])
-                    l = int(df_sub.iloc[0]['L'])
-                    t = int(df_sub.iloc[0]['T'])
-                    return f"{w}-{l}-{t}" if t > 0 else f"{w}-{l}"
+                def format_opp_list(df_sub):
+                    records = [f"{int(r['W'])}-{int(r['L'])}-{int(r['T'])}" if r['T'] > 0 else f"{int(r['W'])}-{int(r['L'])}" for _, r in df_sub.iterrows()]
+                    if len(set(records)) == 1:
+                        names = ", ".join(df_sub['Opponent_Team_Name'].tolist())
+                        return f"{names} ({records[0]})"
+                    else:
+                        items = [f"{r['Opponent_Team_Name']} ({rec})" for (_, r), rec in zip(df_sub.iterrows(), records)]
+                        return ", ".join(items)
 
-                # Easiest Opponent: highest Win %, tiebreak on max Games
                 max_wp = opp_stats['Win %'].max()
                 easiest_candidates = opp_stats[opp_stats['Win %'] == max_wp]
                 max_games_easiest = easiest_candidates['Games'].max()
                 easiest_final = easiest_candidates[easiest_candidates['Games'] == max_games_easiest]
+                easiest_str = format_opp_list(easiest_final)
                 
-                easiest_names = ", ".join(easiest_final['Opponent_Team_Name'].tolist())
-                easiest_rec = format_opp_record(easiest_final)
-                easiest_str = f"{easiest_names} ({easiest_rec})"
-                
-                # Toughest Opponent: lowest Win %, tiebreak on max Games
                 min_wp = opp_stats['Win %'].min()
                 toughest_candidates = opp_stats[opp_stats['Win %'] == min_wp]
                 max_games_toughest = toughest_candidates['Games'].max()
                 toughest_final = toughest_candidates[toughest_candidates['Games'] == max_games_toughest]
-                
-                toughest_names = ", ".join(toughest_final['Opponent_Team_Name'].tolist())
-                toughest_rec = format_opp_record(toughest_final)
-                toughest_str = f"{toughest_names} ({toughest_rec})"
+                toughest_str = format_opp_list(toughest_final)
             else:
                 easiest_str = "N/A"
                 toughest_str = "N/A"
@@ -612,7 +618,6 @@ with tab1:
                 counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
                 counted_box['Clean_Pos'] = counted_box[pos_c].astype(str).str.strip().str.upper()
                 
-                # All-Time Leaders by Position
                 def get_all_time_top(target_positions):
                     pos_df = counted_box[counted_box['Clean_Pos'].isin(target_positions)]
                     if pos_df.empty:
@@ -630,7 +635,6 @@ with tab1:
                 all_time_dst_str = get_all_time_top(['D/ST', 'DST', 'DEF', 'DP'])
                 all_time_k_str = get_all_time_top(['K', 'PK'])
                 
-                # Season by season leaders
                 def get_top_by_pos(target_pos):
                     pos_df = counted_box[counted_box['Clean_Pos'] == target_pos]
                     if pos_df.empty:
@@ -725,7 +729,19 @@ with tab1:
         'Top QB', 'Top RB', 'Top WR', 'Top TE'
     ]
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
-    render_html_table(display_df)
+    
+    def highlight_szn_cells(row):
+        styles = ['' for _ in row.index]
+        szn_val = str(row.get('Season', '')).replace('.0', '').strip()
+        if szn_val in ['2017', '2018']:
+            gray_cols = ['Weekly Bags', 'Top QB', 'Top RB', 'Top WR', 'Top TE']
+            for col in gray_cols:
+                if col in row.index:
+                    idx = row.index.get_loc(col)
+                    styles[idx] = 'background-color: #ebebeb; color: #888888;'
+        return styles
+
+    render_html_table(display_df, highlight_fn=highlight_szn_cells)
     
     st.divider()
     st.write("### Playoff Game Log")
@@ -1031,4 +1047,4 @@ with tab4:
             bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
             bot2 = bot2.rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'})
             render_html_table(bot2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
-                    
+    
