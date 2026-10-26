@@ -3,16 +3,22 @@ import pandas as pd
 
 st.set_page_config(page_title="DFFL Hub", page_icon="🏈", layout="wide")
 
-def render_html_table(df, highlight_fn=None):
+def render_html_table(df, highlight_fn=None, left_align_cols=None):
     styler = df.style.hide(axis='index')
     if highlight_fn:
         styler = styler.apply(highlight_fn, axis=1)
-    styled_html = styler.set_properties(**{
+    styler = styler.set_properties(**{
         'text-align': 'center',
         'padding': '6px 8px',
         'border': '1px solid #e6e6e6',
         'white-space': 'nowrap'
-    }).set_table_styles([
+    })
+    if left_align_cols:
+        valid_cols = [c for c in left_align_cols if c in df.columns]
+        if valid_cols:
+            styler = styler.set_properties(subset=valid_cols, **{'text-align': 'left'})
+            
+    styled_html = styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
         {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
     ]).to_html()
@@ -219,7 +225,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         st.warning("Player data not found. Please ensure 'espn_fantasy_complete_stats_2017_2026.xlsx' is located in this folder.")
         return
         
-    b_szn_str = str(b_season).replace('.0', '').strip()
+    b_szn_str = str(b_season).replace(r'\.0$', '', regex=True).strip()
     b_wk_int = int(b_week)
     b_team_clean = str(b_team).strip().lower()
     
@@ -246,12 +252,10 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         sel_szn_num = float(b_season) if str(b_season).isdigit() else 2026.0
         sel_gt_str = "Matchup"
         
-    # Render Baseball-Reference style Scoreboard Header
     if opp_name.upper() != 'BYE' and opp_name != "Unknown":
         bold_a = "font-weight: 800; color: #111;" if team_pts > opp_pts else ("font-weight: 500; color: #555;" if opp_pts > team_pts else "font-weight: 700; color: #111;")
         bold_b = "font-weight: 800; color: #111;" if opp_pts > team_pts else ("font-weight: 500; color: #555;" if team_pts > opp_pts else "font-weight: 700; color: #111;")
         
-        # Team A season record through that game
         mask_a_szn = (
             (games['Team_Name'] == b_team) &
             (games['Season'] == b_szn_str) &
@@ -262,7 +266,6 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         rec_a_w, rec_a_l, rec_a_t = g_a_thru['W'].sum(), g_a_thru['L'].sum(), g_a_thru['T'].sum()
         rec_a_str = f"{rec_a_w}-{rec_a_l}-{rec_a_t}" if rec_a_t > 0 else f"{rec_a_w}-{rec_a_l}"
         
-        # Opponent season record through that game
         mask_b_szn = (
             (games['Team_Name'] == opp_name) &
             (games['Season'] == b_szn_str) &
@@ -273,7 +276,6 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         rec_b_w, rec_b_l, rec_b_t = g_b_thru['W'].sum(), g_b_thru['L'].sum(), g_b_thru['T'].sum()
         rec_b_str = f"{rec_b_w}-{rec_b_l}-{rec_b_t}" if rec_b_t > 0 else f"{rec_b_w}-{rec_b_l}"
         
-        # H2H series through that game
         h2h_all = games[(games['Team_Name'] == b_team) & (games['Opponent_Team_Name'] == opp_name) & (games['Game_Type'].isin([1, 2]))]
         mask_h2h_thru = (
             (h2h_all['Season_Num'] < sel_szn_num) |
@@ -296,7 +298,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
             </div>
             <div style="display: flex; justify-content: center; align-items: flex-start; gap: 50px; margin-bottom: 8px;">
                 <div style="min-width: 140px; text-align: center;">
-                    <div style="font-size: 17px; font-weight: 600; color: #0d6efd; text-decoration: underline; margin-bottom: 2px;">
+                    <div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">
                         {b_team}
                     </div>
                     <div style="font-size: 34px; {bold_a}; line-height: 1.1;">
@@ -307,7 +309,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
                     </div>
                 </div>
                 <div style="min-width: 140px; text-align: center;">
-                    <div style="font-size: 17px; font-weight: 600; color: #0d6efd; text-decoration: underline; margin-bottom: 2px;">
+                    <div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">
                         {opp_name}
                     </div>
                     <div style="font-size: 34px; {bold_b}; line-height: 1.1;">
@@ -330,7 +332,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
             <div style="font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;">
                 {b_szn_str} &bull; Week {b_wk_int} &bull; Playoff Bye
             </div>
-            <div style="font-size: 17px; font-weight: 600; color: #0d6efd; text-decoration: underline;">{b_team}</div>
+            <div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">{b_team}</div>
             <div style="font-size: 34px; font-weight: 800; color: #111; line-height: 1.1;">{team_pts:.1f}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -348,6 +350,16 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         slot_col = 'Slot' if 'Slot' in df.columns else ('Lineup_Slot' if 'Lineup_Slot' in df.columns else 'Position')
         name_col = 'Player_Name' if 'Player_Name' in df.columns else 'Player'
         pts_col = 'Actual_Points' if 'Actual_Points' in df.columns else 'Points'
+        
+        nfl_col = None
+        for cand in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team']:
+            if cand in df.columns:
+                nfl_col = cand
+                break
+        if not nfl_col and 'Team' in df.columns and 'Team_Name' in df.columns:
+            nfl_col = 'Team'
+            
+        df['NFL Team'] = df[nfl_col].fillna('').astype(str).str.strip() if nfl_col else ""
         
         stat_map = {
             'Passing_Yards': 'Pass Yds', 'Passing_TDs': 'Pass TD', 'Passing_Interceptions': 'INT',
@@ -367,7 +379,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
                             blurbs.append(f"{v_fmt} {label}")
                     except: pass
             for c in df.columns:
-                if c not in stat_map and c not in [name_col, slot_col, pts_col, 'Season', 'Week', 'Team_Name', 'Opponent_Team_Name']:
+                if c not in stat_map and c not in [name_col, slot_col, pts_col, 'NFL Team', 'Season', 'Week', 'Team_Name', 'Opponent_Team_Name']:
                     c_str = str(c).lower()
                     if any(term in c_str for term in ['yard', 'td', 'rec', 'int', 'sack', 'fum']):
                         v = row[c]
@@ -387,13 +399,13 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         starters = df[~is_bench].sort_values(['sort_val', pts_col], ascending=[True, False]).copy()
         bench = df[is_bench].sort_values(pts_col, ascending=False).copy()
         
-        disp_cols = [name_col, slot_col, pts_col, 'Stats']
-        start_disp = starters[disp_cols].rename(columns={name_col: 'Player', pts_col: 'Pts'})
-        bench_disp = bench[disp_cols].rename(columns={name_col: 'Player', pts_col: 'Pts'})
+        disp_cols = [name_col, 'NFL Team', slot_col, pts_col, 'Stats']
+        start_disp = starters[disp_cols].rename(columns={name_col: 'Player', slot_col: 'Slot', pts_col: 'Pts'})
+        bench_disp = bench[disp_cols].rename(columns={name_col: 'Player', slot_col: 'Slot', pts_col: 'Pts'})
         
         if not start_disp.empty:
             total_val = start_disp['Pts'].sum()
-            total_row = pd.DataFrame([{'Player': 'TOTAL', 'Slot': '', 'Pts': total_val, 'Stats': ''}])
+            total_row = pd.DataFrame([{'Player': 'TOTAL', 'NFL Team': '', 'Slot': '', 'Pts': total_val, 'Stats': ''}])
             start_disp = pd.concat([start_disp, total_row], ignore_index=True)
             
         start_disp['Pts'] = start_disp['Pts'].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) and x != '' else "")
@@ -413,20 +425,20 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
     with col_a:
         st.markdown(f"#### {b_team}")
         if not team_start.empty:
-            render_html_table(team_start, highlight_total_row)
+            render_html_table(team_start, highlight_total_row, left_align_cols=['Stats'])
         if not team_bench.empty:
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             st.markdown("**Bench**")
-            render_html_table(team_bench)
+            render_html_table(team_bench, left_align_cols=['Stats'])
     with col_b:
         if opp_name != "Unknown" and opp_name.upper() != 'BYE':
             st.markdown(f"#### {opp_name}")
             if not opp_start.empty:
-                render_html_table(opp_start, highlight_total_row)
+                render_html_table(opp_start, highlight_total_row, left_align_cols=['Stats'])
             if not opp_bench.empty:
                 st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
                 st.markdown("**Bench**")
-                render_html_table(opp_bench)
+                render_html_table(opp_bench, left_align_cols=['Stats'])
         elif opp_name.upper() == 'BYE':
             st.markdown("#### BYE")
         else:
@@ -917,7 +929,7 @@ with tab4:
     elif record_type == "Bottom 2 Matchups":
         if 'Bottom_2_Game' in games.columns:
             bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
-            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
+            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
             bot2['Season'] = bot2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             bot2['Actual_Points'] = bot2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
             bot2['Opp_Points'] = bot2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
