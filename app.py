@@ -3,6 +3,21 @@ import pandas as pd
 
 st.set_page_config(page_title="DFFL Hub", page_icon="🏈", layout="wide")
 
+def render_html_table(df, highlight_fn=None):
+    styler = df.style.hide(axis='index')
+    if highlight_fn:
+        styler = styler.apply(highlight_fn, axis=1)
+    styled_html = styler.set_properties(**{
+        'text-align': 'center',
+        'padding': '6px 8px',
+        'border': '1px solid #e6e6e6',
+        'white-space': 'nowrap'
+    }).set_table_styles([
+        {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
+        {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
+    ]).to_html()
+    st.markdown(styled_html, unsafe_allow_html=True)
+
 @st.cache_data
 def load_box_scores():
     try:
@@ -273,36 +288,49 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         df['sort_val'] = df[slot_col].map(lambda x: slot_order.get(str(x).strip().upper(), 99))
         
         is_bench = df[slot_col].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
-        starters = df[~is_bench].sort_values(['sort_val', pts_col], ascending=[True, False])
-        bench = df[is_bench].sort_values(pts_col, ascending=False)
+        starters = df[~is_bench].sort_values(['sort_val', pts_col], ascending=[True, False]).copy()
+        bench = df[is_bench].sort_values(pts_col, ascending=False).copy()
         
         disp_cols = [name_col, slot_col, pts_col, 'Stats']
         start_disp = starters[disp_cols].rename(columns={name_col: 'Player', pts_col: 'Pts'})
         bench_disp = bench[disp_cols].rename(columns={name_col: 'Player', pts_col: 'Pts'})
         
         if not start_disp.empty:
-            total_row = pd.DataFrame([{'Player': 'TOTAL', 'Slot': '', 'Pts': start_disp['Pts'].sum(), 'Stats': ''}])
+            total_val = start_disp['Pts'].sum()
+            total_row = pd.DataFrame([{'Player': 'TOTAL', 'Slot': '', 'Pts': total_val, 'Stats': ''}])
             start_disp = pd.concat([start_disp, total_row], ignore_index=True)
             
+        start_disp['Pts'] = start_disp['Pts'].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) and x != '' else "")
+        bench_disp['Pts'] = bench_disp['Pts'].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) and x != '' else "")
+        
         return start_disp, bench_disp
 
     team_start, team_bench = format_roster(team_roster)
     opp_start, opp_bench = format_roster(opp_roster)
     
+    def highlight_total_row(row):
+        if str(row.get('Player', '')).strip().upper() == 'TOTAL':
+            return ['font-weight: bold;' for _ in row.index]
+        return ['' for _ in row.index]
+    
     col_a, col_b = st.columns(2)
     with col_a:
         st.markdown(f"#### {b_team} ({team_pts:.1f})")
-        st.dataframe(team_start, use_container_width=True, hide_index=True)
+        if not team_start.empty:
+            render_html_table(team_start, highlight_total_row)
         if not team_bench.empty:
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             st.markdown("**Bench**")
-            st.dataframe(team_bench, use_container_width=True, hide_index=True)
+            render_html_table(team_bench)
     with col_b:
         if opp_name != "Unknown":
             st.markdown(f"#### {opp_name} ({opp_pts:.1f})")
-            st.dataframe(opp_start, use_container_width=True, hide_index=True)
+            if not opp_start.empty:
+                render_html_table(opp_start, highlight_total_row)
             if not opp_bench.empty:
+                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
                 st.markdown("**Bench**")
-                st.dataframe(opp_bench, use_container_width=True, hide_index=True)
+                render_html_table(opp_bench)
         else:
             st.markdown("#### Opponent Matchup Not Found")
 
@@ -543,18 +571,7 @@ with tab1:
         'Top QB', 'Top RB', 'Top WR', 'Top TE'
     ]
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
-    
-    styled_html = display_df.style.hide(axis='index').set_properties(**{
-        'text-align': 'center',
-        'padding': '6px 8px',
-        'border': '1px solid #e6e6e6',
-        'white-space': 'nowrap'
-    }).set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
-        {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
-    ]).to_html()
-    
-    st.markdown(styled_html, unsafe_allow_html=True)
+    render_html_table(display_df)
     
     st.divider()
     st.write("### Playoff Game Log")
@@ -564,17 +581,7 @@ with tab1:
         display_playoffs['Score'] = display_playoffs['Actual_Points'].round(1).astype(str) + " - " + display_playoffs['Opp_Points'].round(1).astype(str)
         
         po_display_df = display_playoffs[['Season', 'Week', 'Playoff_Round', 'Opponent_Team_Name', 'Result', 'Score']].rename(columns={'Opponent_Team_Name': 'Opponent', 'Playoff_Round': 'Round'})
-        
-        po_styled_html = po_display_df.style.hide(axis='index').set_properties(**{
-            'text-align': 'center',
-            'padding': '8px',
-            'border': '1px solid #e6e6e6'
-        }).set_table_styles([
-            {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '8px'), ('border', '1px solid #e6e6e6')]},
-            {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
-        ]).to_html()
-        
-        st.markdown(po_styled_html, unsafe_allow_html=True)
+        render_html_table(po_display_df)
         
         display_playoffs['Game_Label'] = display_playoffs['Season'] + " Week " + display_playoffs['Week'].astype(str) + " vs " + display_playoffs['Opponent_Team_Name']
         view_po_wk = st.selectbox("Select Playoff Game to View Box Score:", ["Select..."] + display_playoffs['Game_Label'].tolist(), key="po_box")
@@ -643,17 +650,7 @@ with tab5:
                 styles[col_opp_idx] = 'font-weight: bold;'
             return styles
         
-        sched_styled_html = disp_sched.style.hide(axis='index').apply(highlight_sched_winners, axis=1).set_properties(**{
-            'text-align': 'center',
-            'padding': '6px 8px',
-            'border': '1px solid #e6e6e6',
-            'white-space': 'nowrap'
-        }).set_table_styles([
-            {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
-            {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
-        ]).to_html()
-        
-        st.markdown(sched_styled_html, unsafe_allow_html=True)
+        render_html_table(disp_sched, highlight_sched_winners)
         
         view_sch_wk = st.selectbox("Select Week to View Box Score:", ["Select..."] + sched['Week'].unique().tolist(), key="sch_box")
         if view_sch_wk != "Select...":
@@ -666,10 +663,10 @@ with tab6:
         st.warning("Player data not found. Please ensure 'espn_fantasy_complete_stats_2017_2026.xlsx' is located in this folder to view box scores.")
     else:
         c1, c2, c3 = st.columns(3)
-        b_season = c1.selectbox("Season", sorted(box_df['Season'].dropna().unique().tolist(), reverse=True), key="b_szn")
-        avail_weeks = sorted(box_df[box_df['Season'] == b_season]['Week'].dropna().unique().tolist())
+        b_season = c1.selectbox("Season", seasons_list, key="b_szn")
+        avail_weeks = sorted(box_df[box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)]['Week'].dropna().unique().tolist())
         b_week = c2.selectbox("Week", avail_weeks, key="b_wk")
-        avail_teams = sorted(box_df[(box_df['Season'] == b_season) & (box_df['Week'] == b_week)]['Team_Name'].dropna().unique().tolist())
+        avail_teams = sorted(box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)) & (box_df['Week'] == b_week)]['Team_Name'].dropna().unique().tolist())
         b_team = c3.selectbox("Manager", avail_teams, key="b_tm")
         
         if b_team:
@@ -736,17 +733,7 @@ with tab2:
                 styles[col_b_idx] = 'font-weight: bold;'
             return styles
         
-        h2h_styled_html = disp_table.style.hide(axis='index').apply(highlight_winners, axis=1).set_properties(**{
-            'text-align': 'center',
-            'padding': '6px 8px',
-            'border': '1px solid #e6e6e6',
-            'white-space': 'nowrap'
-        }).set_table_styles([
-            {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
-            {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
-        ]).to_html()
-        
-        st.markdown(h2h_styled_html, unsafe_allow_html=True)
+        render_html_table(disp_table, highlight_winners)
     else:
         st.write("No matchups found between these teams.")
 
@@ -760,12 +747,18 @@ with tab3:
         
         szn_games = szn_data[szn_data['Week_Num'] <= selected_week]
         szn_st = szn_games.groupby('Team_Name').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum'), PA=('Opp_Points', 'sum')).reset_index()
-        szn_st['Win %'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).round(3)
-        szn_st['PF'] = szn_st['PF'].round(1)
-        szn_st['PA'] = szn_st['PA'].round(1)
-        szn_st = szn_st.sort_values(['Win %', 'PF'], ascending=[False, False])
+        szn_st['Win_Pct_Raw'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
+        szn_st = szn_st.sort_values(['Win_Pct_Raw', 'PF'], ascending=[False, False]).reset_index(drop=True)
         
-        st.dataframe(szn_st[['Team_Name', 'W', 'L', 'T', 'Win %', 'PF', 'PA']].rename(columns={'Team_Name': 'Team'}), use_container_width=True, hide_index=True)
+        szn_st['Rank'] = szn_st.index + 1
+        szn_st['Rank'] = szn_st['Rank'].apply(lambda x: f"{x}{'th' if 11 <= x % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(x % 10, 'th')}")
+        szn_st['Win %'] = szn_st['Win_Pct_Raw'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1 else f"{x:.3f}")
+        szn_st['PF'] = szn_st['PF'].apply(lambda x: f"{float(x):.1f}")
+        szn_st['PA'] = szn_st['PA'].apply(lambda x: f"{float(x):.1f}")
+        szn_st = szn_st.rename(columns={'Team_Name': 'Team'})
+        
+        disp_cols = ['Rank', 'Team', 'W', 'L', 'T', 'Win %', 'PF', 'PA']
+        render_html_table(szn_st[disp_cols])
     else:
         st.write("No regular season data found.")
 
@@ -777,36 +770,60 @@ with tab4:
     record_type = st.radio("Select Category:", record_options, horizontal=True)
     
     if record_type == "Highest Scoring Weeks":
-        top_scores = games[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=False).head(15)
+        top_scores = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=False).head(15).copy().reset_index(drop=True)
+        top_scores['Rank'] = top_scores.index + 1
         top_scores['Season'] = top_scores['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        st.dataframe(top_scores, use_container_width=True, hide_index=True)
+        top_scores['Actual_Points'] = top_scores['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        top_scores = top_scores.rename(columns={'Team_Name': 'Team', 'Actual_Points': 'Points', 'Opponent_Team_Name': 'Opponent'})
+        render_html_table(top_scores[['Rank', 'Season', 'Week', 'Team', 'Points', 'Opponent']])
         
     elif record_type == "Lowest Scoring Weeks":
-        low_scores = games[games['Actual_Points'] > 0][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=True).head(15)
+        low_scores = games[(games['Actual_Points'] > 0) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=True).head(15).copy().reset_index(drop=True)
+        low_scores['Rank'] = low_scores.index + 1
         low_scores['Season'] = low_scores['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        st.dataframe(low_scores, use_container_width=True, hide_index=True)
+        low_scores['Actual_Points'] = low_scores['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        low_scores = low_scores.rename(columns={'Team_Name': 'Team', 'Actual_Points': 'Points', 'Opponent_Team_Name': 'Opponent'})
+        render_html_table(low_scores[['Rank', 'Season', 'Week', 'Team', 'Points', 'Opponent']])
         
     elif record_type == "Biggest Blowouts":
-        blowouts = games[(games['W'] == 1) & (games['Game_Type'] != 4)][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=False).head(15)
+        blowouts = games[(games['W'] == 1) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=False).head(15).copy().reset_index(drop=True)
+        blowouts['Rank'] = blowouts.index + 1
         blowouts['Season'] = blowouts['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        st.dataframe(blowouts, use_container_width=True, hide_index=True)
+        blowouts['Actual_Points'] = blowouts['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        blowouts['Opp_Points'] = blowouts['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+        blowouts['Margin'] = blowouts['Margin'].apply(lambda x: f"{float(x):.1f}")
+        blowouts = blowouts.rename(columns={'Team_Name': 'Winner', 'Actual_Points': 'Winner Pts', 'Opponent_Team_Name': 'Loser', 'Opp_Points': 'Loser Pts'})
+        render_html_table(blowouts[['Rank', 'Season', 'Week', 'Winner', 'Winner Pts', 'Loser', 'Loser Pts', 'Margin']])
         
     elif record_type == "Closest Games":
-        closest = games[(games['W'] == 1) & (games['Margin'] > 0) & (games['Game_Type'] != 4)][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=True).head(15)
+        closest = games[(games['W'] == 1) & (games['Margin'] > 0) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=True).head(15).copy().reset_index(drop=True)
+        closest['Rank'] = closest.index + 1
         closest['Season'] = closest['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        st.dataframe(closest, use_container_width=True, hide_index=True)
+        closest['Actual_Points'] = closest['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        closest['Opp_Points'] = closest['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+        closest['Margin'] = closest['Margin'].apply(lambda x: f"{float(x):.1f}")
+        closest = closest.rename(columns={'Team_Name': 'Winner', 'Actual_Points': 'Winner Pts', 'Opponent_Team_Name': 'Loser', 'Opp_Points': 'Loser Pts'})
+        render_html_table(closest[['Rank', 'Season', 'Week', 'Winner', 'Winner Pts', 'Loser', 'Loser Pts', 'Margin']])
         
     elif record_type == "Top 2 Matchups":
         if 'Top_2_Game' in games.columns:
             top2_mask = games['Top_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
-            top2 = games[top2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
+            top2 = games[top2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
             top2['Season'] = top2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            st.dataframe(top2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}), use_container_width=True, hide_index=True)
+            top2['Actual_Points'] = top2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+            top2['Opp_Points'] = top2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+            top2['Margin'] = top2['Margin'].apply(lambda x: f"{float(x):.1f}")
+            top2 = top2.rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'})
+            render_html_table(top2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
         
     elif record_type == "Bottom 2 Matchups":
         if 'Bottom_2_Game' in games.columns:
             bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
-            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
+            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
             bot2['Season'] = bot2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            st.dataframe(bot2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}), use_container_width=True, hide_index=True)
+            bot2['Actual_Points'] = bot2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+            bot2['Opp_Points'] = bot2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+            bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
+            bot2 = bot2.rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'})
+            render_html_table(bot2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
             
