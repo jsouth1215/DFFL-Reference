@@ -302,51 +302,34 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         else:
             h2h_thru_str = f"Series tied {thru_w}-{thru_l}" + (f"-{thru_t}" if thru_t > 0 else "")
             
-        header_html = f"""
-        <div style="background-color: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 8px; padding: 14px 20px; margin: 10px 0 20px 0; text-align: center;">
-            <div style="font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">
-                {b_szn_str} &bull; Week {b_wk_int} &bull; {sel_gt_str}
-            </div>
-            <div style="display: flex; justify-content: center; align-items: flex-start; gap: 50px; margin-bottom: 8px;">
-                <div style="min-width: 140px; text-align: center;">
-                    <div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">
-                        {b_team}
-                    </div>
-                    <div style="font-size: 34px; {bold_a}; line-height: 1.1;">
-                        {team_pts:.1f}
-                    </div>
-                    <div style="font-size: 14px; font-weight: 500; color: #495057; margin-top: 2px;">
-                        {rec_a_str}
-                    </div>
-                </div>
-                <div style="min-width: 140px; text-align: center;">
-                    <div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">
-                        {opp_name}
-                    </div>
-                    <div style="font-size: 34px; {bold_b}; line-height: 1.1;">
-                        {opp_pts:.1f}
-                    </div>
-                    <div style="font-size: 14px; font-weight: 500; color: #495057; margin-top: 2px;">
-                        {rec_b_str}
-                    </div>
-                </div>
-            </div>
-            <div style="font-size: 13px; font-weight: 600; color: #495057; border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 6px; display: inline-block;">
-                H2H Series through this game: {h2h_thru_str}
-            </div>
-        </div>
-        """
+        header_html = (
+            '<div style="background-color: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 8px; padding: 14px 20px; margin: 10px 0 20px 0; text-align: center;">'
+            f'<div style="font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">{b_szn_str} &bull; Week {b_wk_int} &bull; {sel_gt_str}</div>'
+            '<div style="display: flex; justify-content: center; align-items: flex-start; gap: 50px; margin-bottom: 8px;">'
+            '<div style="min-width: 140px; text-align: center;">'
+            f'<div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">{b_team}</div>'
+            f'<div style="font-size: 34px; {bold_a}; line-height: 1.1;">{team_pts:.1f}</div>'
+            f'<div style="font-size: 14px; font-weight: 500; color: #495057; margin-top: 2px;">{rec_a_str}</div>'
+            '</div>'
+            '<div style="min-width: 140px; text-align: center;">'
+            f'<div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">{opp_name}</div>'
+            f'<div style="font-size: 34px; {bold_b}; line-height: 1.1;">{opp_pts:.1f}</div>'
+            f'<div style="font-size: 14px; font-weight: 500; color: #495057; margin-top: 2px;">{rec_b_str}</div>'
+            '</div>'
+            '</div>'
+            f'<div style="font-size: 13px; font-weight: 600; color: #495057; border-top: 1px solid rgba(128, 128, 128, 0.2); padding-top: 6px; display: inline-block;">H2H Series through this game: {h2h_thru_str}</div>'
+            '</div>'
+        )
         st.markdown(header_html, unsafe_allow_html=True)
     elif opp_name.upper() == 'BYE':
-        st.markdown(f"""
-        <div style="background-color: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 8px; padding: 14px 20px; margin: 10px 0 20px 0; text-align: center;">
-            <div style="font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;">
-                {b_szn_str} &bull; Week {b_wk_int} &bull; Playoff Bye
-            </div>
-            <div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">{b_team}</div>
-            <div style="font-size: 34px; font-weight: 800; color: #111; line-height: 1.1;">{team_pts:.1f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            '<div style="background-color: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 8px; padding: 14px 20px; margin: 10px 0 20px 0; text-align: center;">'
+            f'<div style="font-size: 13px; font-weight: 700; color: #6c757d; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;">{b_szn_str} &bull; Week {b_wk_int} &bull; Playoff Bye</div>'
+            f'<div style="font-size: 18px; font-weight: 700; color: #111; margin-bottom: 2px;">{b_team}</div>'
+            f'<div style="font-size: 34px; font-weight: 800; color: #111; line-height: 1.1;">{team_pts:.1f}</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
         
     team_roster = box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == b_szn_str) & (box_df['Week'] == b_wk_int) & (box_df['Team_Name'] == b_team)].copy()
     opp_roster = box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == b_szn_str) & (box_df['Week'] == b_wk_int) & (box_df['Team_Name'] == opp_name)].copy()
@@ -1206,50 +1189,47 @@ with tab4:
             
         po_df = pd.DataFrame(po_records_list).sort_values(['Appearances', 'Total_W', 'Byes'], ascending=[False, False, False]).reset_index(drop=True)
         
-        po_html = """
-        <table style="width: 100%; border-collapse: collapse; text-align: center;">
-            <thead>
-                <tr>
-                    <th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Team</th>
-                    <th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Playoff Appearances</th>
-                    <th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Byes</th>
-                    <th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Total Postseason</th>
-                    <th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Quarterfinals</th>
-                    <th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Semifinals</th>
-                    <th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Finals</th>
-                </tr>
-                <tr>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>
-                    <th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>
-                </tr>
-            </thead>
-            <tbody>
-        """
-        for _, row in po_df.iterrows():
-            po_html += f"""
-                <tr>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['Team']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['Appearances']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['Byes']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['Total_W']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['Total_L']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['QF_W']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['QF_L']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['SF_W']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['SF_L']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['F_W']}</td>
-                    <td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{row['F_L']}</td>
-                </tr>
-            """
-        po_html += """
-            </tbody>
-        </table>
-        """
+        po_html = (
+            '<table style="width: 100%; border-collapse: collapse; text-align: center;">'
+            '<thead>'
+            '<tr>'
+            '<th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Team</th>'
+            '<th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Playoff Appearances</th>'
+            '<th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Byes</th>'
+            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Total Postseason</th>'
+            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Quarterfinals</th>'
+            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Semifinals</th>'
+            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Finals</th>'
+            '</tr>'
+            '<tr>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
+            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
+            '</tr>'
+            '</thead>'
+            '<tbody>'
+        )
+        for _, r in po_df.iterrows():
+            po_html += (
+                '<tr>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Team"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Appearances"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Byes"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Total_W"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Total_L"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["QF_W"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["QF_L"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["SF_W"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["SF_L"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["F_W"]}</td>'
+                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["F_L"]}</td>'
+                '</tr>'
+            )
+        po_html += '</tbody></table>'
         st.markdown(po_html, unsafe_allow_html=True)
         
