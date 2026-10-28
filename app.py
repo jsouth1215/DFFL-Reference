@@ -1173,16 +1173,17 @@ with tab4:
                     byes += 1
                     
             po_games = games[(games['Team_Name'] == t) & (games['Game_Type'] == 2)]
+            round_str = po_games['Playoff_Round'].astype(str).str.strip().str.lower()
             
-            qf_games = po_games[po_games['Playoff_Round'].astype(str).str.lower().str.contains('quarter')]
+            qf_games = po_games[round_str.str.contains('quarter')]
             qf_w = int(qf_games['W'].sum())
             qf_l = int(qf_games['L'].sum())
             
-            sf_games = po_games[po_games['Playoff_Round'].astype(str).str.lower().str.contains('semi')]
+            sf_games = po_games[round_str.str.contains('semi')]
             sf_w = int(sf_games['W'].sum())
             sf_l = int(sf_games['L'].sum())
             
-            f_games = po_games[po_games['Playoff_Round'].astype(str).str.lower().str.contains('final|championship')]
+            f_games = po_games[round_str.str.contains('final|champ') & ~round_str.str.contains('quarter|semi')]
             f_w = int(f_games['W'].sum())
             f_l = int(f_games['L'].sum())
             
