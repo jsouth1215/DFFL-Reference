@@ -888,19 +888,16 @@ with tab_player:
         dps_year = dps_c2.selectbox("Season", ["All-Time"] + seasons_list, key="dps_year")
         dps_pos_view = dps_c3.selectbox("Position View", ["All Positions", "QB", "RB", "WR", "TE", "K", "D/ST"], key="dps_pos")
 
-        # 1. Base Box Score cleanup
         b_clean = box_df.copy()
         b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
         b_clean['Team_Str'] = b_clean['Team_Name'].astype(str).str.strip()
 
-        # 2. Match games that count for this manager
         el_games = games[(games['Team_Name'] == dps_team) & (games['Game_Type'].isin([1, 2, 4]))][['Season', 'Week', 'Team_Name']].drop_duplicates()
         el_games['Season_Str'] = el_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         el_games['Week_Num'] = pd.to_numeric(el_games['Week'], errors='coerce').fillna(0).astype(int)
         el_games['Team_Str'] = el_games['Team_Name'].astype(str).str.strip()
 
-        # 3. Identify column keys
         slot_c = 'Slot' if 'Slot' in b_clean.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_clean.columns else 'Position')
         name_c = 'Player_Name' if 'Player_Name' in b_clean.columns else 'Player'
         pts_c = 'Actual_Points' if 'Actual_Points' in b_clean.columns else 'Points'
@@ -916,7 +913,6 @@ with tab_player:
 
         b_clean['NFL_Team_Clean'] = b_clean[nfl_col].fillna('').astype(str).str.strip() if nfl_col else ""
 
-        # Filter starters only
         is_starter = ~b_clean[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
         starters = b_clean[(b_clean['Team_Str'] == dps_team) & is_starter]
 
@@ -938,28 +934,48 @@ with tab_player:
         counted_box['Clean_Pos'] = counted_box[pos_c].apply(clean_pos_val)
         counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
 
-        # Stat mapping candidates
-        def find_col(cands):
+        def find_col(cands, fallback_keywords=None, fallback_exclude=None):
             for cand in cands:
+                cand_norm = cand.lower().replace('_', '').replace(' ', '')
                 for c in counted_box.columns:
-                    if c.lower() == cand.lower():
+                    c_norm = str(c).lower().replace('_', '').replace(' ', '')
+                    if c_norm == cand_norm:
+                        return c
+            if fallback_keywords:
+                for c in counted_box.columns:
+                    c_str = str(c).lower().replace(' ', '_')
+                    if all(kw in c_str for kw in fallback_keywords):
+                        if fallback_exclude and any(ex in c_str for ex in fallback_exclude):
+                            continue
                         return c
             return None
 
-        col_pass_yds = find_col(['Passing_Yards', 'Pass_Yds', 'Pass_Yards'])
-        col_pass_td = find_col(['Passing_TDs', 'Pass_TD', 'Pass_TDs'])
-        col_pass_int = find_col(['Passing_Interceptions', 'Pass_Int', 'INT'])
-        col_rush_yds = find_col(['Rushing_Yards', 'Rush_Yds', 'Rush_Yards'])
-        col_rush_td = find_col(['Rushing_TDs', 'Rush_TD', 'Rush_TDs'])
-        col_rec = find_col(['Receptions', 'Rec'])
-        col_rec_yds = find_col(['Receiving_Yards', 'Rec_Yds', 'Rec_Yards'])
-        col_rec_td = find_col(['Receiving_TDs', 'Rec_TD', 'Rec_TDs'])
+        col_pass_yds = find_col(['Passing_Yards', 'Pass_Yards', 'Passing_Yds', 'Pass_Yds'], fallback_keywords=['pass', 'yard'])
+        col_pass_td = find_col(['Passing_TDs', 'Passing_TD', 'Pass_TDs', 'Pass_TD', 'Passing_Touchdowns'], fallback_keywords=['pass', 'td'], fallback_exclude=['rush', 'rec', 'def'])
+        col_pass_int = find_col(['Passing_Interceptions', 'Passing_Int', 'Pass_Int', 'Interceptions', 'INT'], fallback_keywords=['int'], fallback_exclude=['def'])
+        col_rush_yds = find_col(['Rushing_Yards', 'Rush_Yards', 'Rushing_Yds', 'Rush_Yds'], fallback_keywords=['rush', 'yard'])
+        col_rush_td = find_col(['Rushing_TDs', 'Rushing_TD', 'Rush_TDs', 'Rush_TD', 'Rushing_Touchdowns'], fallback_keywords=['rush', 'td'], fallback_exclude=['pass', 'rec', 'def'])
+        col_rec = find_col(['Receptions', 'Reception', 'Rec', 'Catches'], fallback_keywords=['rec'], fallback_exclude=['yard', 'td', 'touchdown', 'pass', 'rush', 'def', 'fum', 'int'])
+        col_rec_yds = find_col(['Receiving_Yards', 'Receiving_Yds', 'Rec_Yards', 'Rec_Yds'], fallback_keywords=['rec', 'yard'], fallback_exclude=['pass', 'rush'])
+        col_rec_td = find_col(
+            ['Receiving_TDs', 'Receiving_TD', 'Rec_TDs', 'Rec_TD', 'Receiving_Touchdowns', 'Receiving_Touchdown', 'Rec_Touchdowns', 'Rec_Touchdown', 'TD_Receiving', 'TD_Rec'],
+            fallback_keywords=['rec', 'td'],
+            fallback_exclude=['pass', 'rush', 'def', 'int', 'return', 'fum']
+        )
+        if not col_rec_td:
+            col_rec_td = find_col([], fallback_keywords=['rec', 'touchdown'], fallback_exclude=['pass', 'rush', 'def', 'int', 'return', 'fum'])
+
         col_sacks = find_col(['Sacks', 'Sack'])
-        col_def_int = find_col(['Defensive_Interceptions', 'Def_INT', 'Defensive_Int'])
-        col_def_td = find_col(['Defensive_TDs', 'Def_TD', 'Def_TDs'])
-        col_fum_rec = find_col(['Fumbles_Recovered', 'Fum_Rec'])
-        col_fgm = find_col(['Field_Goals_Made', 'FGM', 'FG_Made'])
-        col_xpm = find_col(['Extra_Points_Made', 'XPM', 'XP_Made'])
+        col_def_int = find_col(['Defensive_Interceptions', 'Def_INT', 'Defensive_Int'], fallback_keywords=['def', 'int'])
+        col_def_td = find_col(['Defensive_TDs', 'Defensive_TD', 'Def_TD', 'Def_TDs'], fallback_keywords=['def', 'td'])
+        col_fum_rec = find_col(['Fumbles_Recovered', 'Fum_Rec', 'FR'], fallback_keywords=['fum', 'rec'])
+        col_fgm = find_col(['Field_Goals_Made', 'FG_Made', 'FGM'], fallback_keywords=['fg', 'made'])
+        col_xpm = find_col(['Extra_Points_Made', 'XP_Made', 'XPM'], fallback_keywords=['xp', 'made'])
+
+        def get_stat_sum(grp, col):
+            if col and col in grp.columns:
+                return int(round(pd.to_numeric(grp[col], errors='coerce').fillna(0).sum()))
+            return 0
 
         def build_pos_table(target_pos):
             pos_data = counted_box[counted_box['Clean_Pos'] == target_pos].copy()
@@ -968,7 +984,7 @@ with tab_player:
 
             rows = []
             for player, grp in pos_data.groupby(name_c):
-                tot_pts = grp[pts_c].sum()
+                tot_pts = pd.to_numeric(grp[pts_c], errors='coerce').fillna(0).sum()
                 if tot_pts <= 0:
                     continue
                 starts = len(grp)
@@ -987,32 +1003,32 @@ with tab_player:
                 }
 
                 if target_pos == 'QB':
-                    row_item['Pass Yds'] = int(round(grp[col_pass_yds].sum())) if col_pass_yds else 0
-                    row_item['Pass TD'] = int(round(grp[col_pass_td].sum())) if col_pass_td else 0
-                    row_item['INT'] = int(round(grp[col_pass_int].sum())) if col_pass_int else 0
-                    row_item['Rush Yds'] = int(round(grp[col_rush_yds].sum())) if col_rush_yds else 0
-                    row_item['Rush TD'] = int(round(grp[col_rush_td].sum())) if col_rush_td else 0
+                    row_item['Pass Yds'] = get_stat_sum(grp, col_pass_yds)
+                    row_item['Pass TD'] = get_stat_sum(grp, col_pass_td)
+                    row_item['INT'] = get_stat_sum(grp, col_pass_int)
+                    row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
+                    row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
                 elif target_pos == 'RB':
-                    row_item['Rush Yds'] = int(round(grp[col_rush_yds].sum())) if col_rush_yds else 0
-                    row_item['Rush TD'] = int(round(grp[col_rush_td].sum())) if col_rush_td else 0
-                    row_item['Rec'] = int(round(grp[col_rec].sum())) if col_rec else 0
-                    row_item['Rec Yds'] = int(round(grp[col_rec_yds].sum())) if col_rec_yds else 0
-                    row_item['Rec TD'] = int(round(grp[col_rec_td].sum())) if col_rec_td else 0
+                    row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
+                    row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
+                    row_item['Rec'] = get_stat_sum(grp, col_rec)
+                    row_item['Rec Yds'] = get_stat_sum(grp, col_rec_yds)
+                    row_item['Rec TD'] = get_stat_sum(grp, col_rec_td)
                 elif target_pos in ['WR', 'TE']:
-                    row_item['Rec'] = int(round(grp[col_rec].sum())) if col_rec else 0
-                    row_item['Rec Yds'] = int(round(grp[col_rec_yds].sum())) if col_rec_yds else 0
-                    row_item['Rec TD'] = int(round(grp[col_rec_td].sum())) if col_rec_td else 0
+                    row_item['Rec'] = get_stat_sum(grp, col_rec)
+                    row_item['Rec Yds'] = get_stat_sum(grp, col_rec_yds)
+                    row_item['Rec TD'] = get_stat_sum(grp, col_rec_td)
                     if target_pos == 'WR':
-                        row_item['Rush Yds'] = int(round(grp[col_rush_yds].sum())) if col_rush_yds else 0
-                        row_item['Rush TD'] = int(round(grp[col_rush_td].sum())) if col_rush_td else 0
+                        row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
+                        row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
                 elif target_pos == 'K':
-                    if col_fgm: row_item['FGM'] = int(round(grp[col_fgm].sum()))
-                    if col_xpm: row_item['XPM'] = int(round(grp[col_xpm].sum()))
+                    if col_fgm: row_item['FGM'] = get_stat_sum(grp, col_fgm)
+                    if col_xpm: row_item['XPM'] = get_stat_sum(grp, col_xpm)
                 elif target_pos == 'D/ST':
-                    if col_sacks: row_item['Sacks'] = int(round(grp[col_sacks].sum()))
-                    if col_def_int: row_item['INT'] = int(round(grp[col_def_int].sum()))
-                    if col_fum_rec: row_item['FR'] = int(round(grp[col_fum_rec].sum()))
-                    if col_def_td: row_item['TD'] = int(round(grp[col_def_td].sum()))
+                    if col_sacks: row_item['Sacks'] = get_stat_sum(grp, col_sacks)
+                    if col_def_int: row_item['INT'] = get_stat_sum(grp, col_def_int)
+                    if col_fum_rec: row_item['FR'] = get_stat_sum(grp, col_fum_rec)
+                    if col_def_td: row_item['TD'] = get_stat_sum(grp, col_def_td)
 
                 rows.append(row_item)
 
@@ -1419,4 +1435,4 @@ with tab4:
             )
         po_html += '</tbody></table>'
         st.markdown(po_html, unsafe_allow_html=True)
-                                                                                    
+        
