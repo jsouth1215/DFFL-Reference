@@ -438,6 +438,74 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         else:
             st.markdown("#### Opponent Matchup Not Found")
 
+def get_starter_performances(box_df, games):
+    if box_df.empty or games.empty:
+        return pd.DataFrame()
+    b_c = box_df.copy()
+    b_c['Season_Str'] = b_c['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    b_c['Week_Num'] = pd.to_numeric(b_c['Week'], errors='coerce').fillna(0).astype(int)
+    b_c['Team_Str'] = b_c['Team_Name'].astype(str).str.strip()
+    
+    slot_col = 'Slot' if 'Slot' in b_c.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_c.columns else 'Position')
+    name_col = 'Player_Name' if 'Player_Name' in b_c.columns else 'Player'
+    pts_col = 'Actual_Points' if 'Actual_Points' in b_c.columns else 'Points'
+    pos_col = 'Position' if 'Position' in b_c.columns else ('Pos' if 'Pos' in b_c.columns else slot_col)
+    
+    nfl_c = None
+    for cand in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team']:
+        if cand in b_c.columns:
+            nfl_c = cand
+            break
+    if not nfl_c and 'Team' in b_c.columns and 'Team_Name' in b_c.columns:
+        nfl_c = 'Team'
+    b_c['NFL Team'] = b_c[nfl_c].fillna('').astype(str).str.strip() if nfl_c else ""
+
+    is_start = ~b_c[slot_col].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+    start_df = b_c[is_start].copy()
+    start_df['Points_Num'] = pd.to_numeric(start_df[pts_col], errors='coerce').fillna(0)
+    
+    def clean_pos(val):
+        p = str(val).strip().upper()
+        if p == 'QB': return 'QB'
+        if p == 'RB': return 'RB'
+        if p == 'WR': return 'WR'
+        if p == 'TE': return 'TE'
+        if p in ['K', 'PK']: return 'K'
+        if p in ['D/ST', 'DST', 'DEF', 'DP']: return 'D/ST'
+        return p
+    start_df['Pos'] = start_df[pos_col].apply(clean_pos)
+    
+    cols_to_drop = [c for c in ['Opponent_Team_Name', 'Opponent', 'Outcome'] if c in start_df.columns]
+    if cols_to_drop:
+        start_df = start_df.drop(columns=cols_to_drop)
+    
+    el_g = games[games['Game_Type'].isin([1, 2, 4]) & (games['Team_Name'].str.upper() != 'CAM')].copy()
+    el_g['Season_Str'] = el_g['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    el_g['Week_Num'] = pd.to_numeric(el_g['Week'], errors='coerce').fillna(0).astype(int)
+    el_g['Team_Str'] = el_g['Team_Name'].astype(str).str.strip()
+    
+    def make_outcome(r):
+        if r['Game_Type'] == 4:
+            return f"BYE ({float(r['Actual_Points']):.1f})"
+        res = 'W' if r['W'] == 1 else ('L' if r['L'] == 1 else 'T')
+        return f"{res} ({float(r['Actual_Points']):.1f} - {float(r['Opp_Points']):.1f})"
+    el_g['Outcome'] = el_g.apply(make_outcome, axis=1)
+    
+    el_g_sub = el_g[['Season_Str', 'Week_Num', 'Team_Str', 'Opponent_Team_Name', 'Outcome']].drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
+    
+    merged = pd.merge(
+        start_df,
+        el_g_sub,
+        on=['Season_Str', 'Week_Num', 'Team_Str'],
+        how='inner'
+    )
+    merged['Player'] = merged[name_col]
+    merged['Season'] = merged['Season_Str']
+    merged['Week'] = merged['Week_Num']
+    merged['Team'] = merged['Team_Str']
+    merged['Opponent'] = merged['Opponent_Team_Name']
+    return merged
+
 st.title("🏈 DFFL History Hub")
 
 try:
@@ -992,6 +1060,9 @@ with tab4:
     record_options.extend([
         "Highest Scoring Players",
         "Lowest Scoring Players",
+        "Highest Scoring Stacks",
+        "Most Fantasy Teams Started For",
+        "Started on Same Fantasy Team for 3+ NFL Teams",
         "Team Record - Highest Score",
         "Team Record - Lowest Score",
         "Weekly Bag by Team",
@@ -1010,75 +1081,6 @@ with tab4:
         [str(s).replace('.0', '').strip() for s in games['Season'].unique() if str(s).replace('.0', '').strip().isdigit() and int(str(s).replace('.0', '').strip()) >= 2017],
         key=lambda x: int(x)
     )
-
-    def get_starter_performances():
-        if box_df.empty or games.empty:
-            return pd.DataFrame()
-        b_c = box_df.copy()
-        b_c['Season_Str'] = b_c['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        b_c['Week_Num'] = pd.to_numeric(b_c['Week'], errors='coerce').fillna(0).astype(int)
-        b_c['Team_Str'] = b_c['Team_Name'].astype(str).str.strip()
-        
-        slot_col = 'Slot' if 'Slot' in b_c.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_c.columns else 'Position')
-        name_col = 'Player_Name' if 'Player_Name' in b_c.columns else 'Player'
-        pts_col = 'Actual_Points' if 'Actual_Points' in b_c.columns else 'Points'
-        pos_col = 'Position' if 'Position' in b_c.columns else ('Pos' if 'Pos' in b_c.columns else slot_col)
-        
-        nfl_c = None
-        for cand in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team']:
-            if cand in b_c.columns:
-                nfl_c = cand
-                break
-        if not nfl_c and 'Team' in b_c.columns and 'Team_Name' in b_c.columns:
-            nfl_c = 'Team'
-        b_c['NFL Team'] = b_c[nfl_c].fillna('').astype(str).str.strip() if nfl_c else ""
-
-        is_start = ~b_c[slot_col].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
-        start_df = b_c[is_start].copy()
-        start_df['Points_Num'] = pd.to_numeric(start_df[pts_col], errors='coerce').fillna(0)
-        
-        def clean_pos(val):
-            p = str(val).strip().upper()
-            if p == 'QB': return 'QB'
-            if p == 'RB': return 'RB'
-            if p == 'WR': return 'WR'
-            if p == 'TE': return 'TE'
-            if p in ['K', 'PK']: return 'K'
-            if p in ['D/ST', 'DST', 'DEF', 'DP']: return 'D/ST'
-            return p
-        start_df['Pos'] = start_df[pos_col].apply(clean_pos)
-        
-        # Prevent pandas merge collisions with opponent name
-        cols_to_drop = [c for c in ['Opponent_Team_Name', 'Opponent', 'Outcome'] if c in start_df.columns]
-        if cols_to_drop:
-            start_df = start_df.drop(columns=cols_to_drop)
-        
-        el_g = games[games['Game_Type'].isin([1, 2, 4]) & (games['Team_Name'].str.upper() != 'CAM')].copy()
-        el_g['Season_Str'] = el_g['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        el_g['Week_Num'] = pd.to_numeric(el_g['Week'], errors='coerce').fillna(0).astype(int)
-        el_g['Team_Str'] = el_g['Team_Name'].astype(str).str.strip()
-        
-        def make_outcome(r):
-            if r['Game_Type'] == 4:
-                return f"BYE ({float(r['Actual_Points']):.1f})"
-            res = 'W' if r['W'] == 1 else ('L' if r['L'] == 1 else 'T')
-            return f"{res} ({float(r['Actual_Points']):.1f} - {float(r['Opp_Points']):.1f})"
-        el_g['Outcome'] = el_g.apply(make_outcome, axis=1)
-        
-        el_g_sub = el_g[['Season_Str', 'Week_Num', 'Team_Str', 'Opponent_Team_Name', 'Outcome']].drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
-        
-        merged = pd.merge(
-            start_df,
-            el_g_sub,
-            on=['Season_Str', 'Week_Num', 'Team_Str'],
-            how='inner'
-        )
-        merged['Player'] = merged[name_col]
-        merged['Season'] = merged['Season_Str']
-        merged['Week'] = merged['Week_Num']
-        merged['Team'] = merged['Team_Str']
-        merged['Opponent'] = merged['Opponent_Team_Name']
-        return merged
     
     if record_type == "Highest Scoring Weeks":
         top_scores = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=False).head(15).copy().reset_index(drop=True)
@@ -1151,7 +1153,7 @@ with tab4:
             render_html_table(bot2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
 
     elif record_type == "Highest Scoring Players":
-        p_perf = get_starter_performances()
+        p_perf = get_starter_performances(box_df, games)
         if not p_perf.empty:
             top_players = p_perf.sort_values('Points_Num', ascending=False).head(15).copy().reset_index(drop=True)
             top_players['Rank'] = top_players.index + 1
@@ -1162,7 +1164,7 @@ with tab4:
             st.info("No player scoring records available.")
 
     elif record_type == "Lowest Scoring Players":
-        p_perf = get_starter_performances()
+        p_perf = get_starter_performances(box_df, games)
         if not p_perf.empty:
             st.write("### Lowest Scoring Starters (All Positions)")
             low_all = p_perf.sort_values('Points_Num', ascending=True).head(15).copy().reset_index(drop=True)
@@ -1179,6 +1181,93 @@ with tab4:
                 render_html_table(non_dst_neg[[c for c in cols_disp if c in non_dst_neg.columns]])
             else:
                 st.info("No non-defense starters have scored negative points.")
+        else:
+            st.info("No player scoring records available.")
+
+    elif record_type == "Highest Scoring Stacks":
+        p_perf = get_starter_performances(box_df, games)
+        if not p_perf.empty:
+            stacks_list = []
+            for (s, w, tm), g_df in p_perf.groupby(['Season', 'Week', 'Team']):
+                qbs = g_df[g_df['Pos'] == 'QB']
+                catchers = g_df[g_df['Pos'].isin(['WR', 'TE'])]
+                if qbs.empty or catchers.empty:
+                    continue
+                for _, qb_r in qbs.iterrows():
+                    qb_nfl = str(qb_r['NFL Team']).strip()
+                    if not qb_nfl or qb_nfl in ['-', 'FA']:
+                        continue
+                    same_team_catchers = catchers[catchers['NFL Team'].astype(str).str.strip() == qb_nfl]
+                    for _, c_r in same_team_catchers.iterrows():
+                        comb_pts = float(qb_r['Points_Num']) + float(c_r['Points_Num'])
+                        stacks_list.append({
+                            'QB': f"{qb_r['Player']} ({float(qb_r['Points_Num']):.1f})",
+                            'Pass Catcher': f"{c_r['Player']} ({float(c_r['Points_Num']):.1f})",
+                            'Pos': c_r['Pos'],
+                            'NFL Team': qb_nfl,
+                            'Combined_Num': comb_pts,
+                            'Combined Pts': f"{comb_pts:.1f}",
+                            'Season': s,
+                            'Week': w,
+                            'Team': tm,
+                            'Opponent': qb_r['Opponent'],
+                            'Outcome': qb_r['Outcome']
+                        })
+            if stacks_list:
+                stacks_df = pd.DataFrame(stacks_list).sort_values('Combined_Num', ascending=False).head(15).reset_index(drop=True)
+                stacks_df['Rank'] = stacks_df.index + 1
+                cols_stk = ['Rank', 'QB', 'Pass Catcher', 'Pos', 'NFL Team', 'Combined Pts', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']
+                render_html_table(stacks_df[cols_stk])
+            else:
+                st.info("No starting QB/WR or QB/TE same-team stacks found.")
+        else:
+            st.info("No player scoring records available.")
+
+    elif record_type == "Most Fantasy Teams Started For":
+        p_perf = get_starter_performances(box_df, games)
+        if not p_perf.empty:
+            non_dst = p_perf[~p_perf['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])].copy()
+            travelers = []
+            for player, grp in non_dst.groupby('Player'):
+                f_teams = sorted(list(set(str(t).strip() for t in grp['Team'].unique() if str(t).strip())))
+                if len(f_teams) > 1:
+                    pos_val = grp['Pos'].mode().iloc[0] if not grp['Pos'].empty else ""
+                    travelers.append({
+                        'Player': player,
+                        'Pos': pos_val,
+                        'Teams Count': len(f_teams),
+                        'Fantasy Teams': ", ".join(f_teams)
+                    })
+            if travelers:
+                trav_df = pd.DataFrame(travelers).sort_values(['Teams Count', 'Player'], ascending=[False, True]).head(15).reset_index(drop=True)
+                trav_df['Rank'] = trav_df.index + 1
+                render_html_table(trav_df[['Rank', 'Player', 'Pos', 'Teams Count', 'Fantasy Teams']], left_align_cols=['Fantasy Teams'])
+            else:
+                st.info("No players found starting for multiple fantasy teams.")
+        else:
+            st.info("No player scoring records available.")
+
+    elif record_type == "Started on Same Fantasy Team for 3+ NFL Teams":
+        p_perf = get_starter_performances(box_df, games)
+        if not p_perf.empty:
+            non_dst = p_perf[~p_perf['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])].copy()
+            journeyman_records = []
+            for (player, tm), grp in non_dst.groupby(['Player', 'Team']):
+                nfl_tms = sorted(list(set(str(t).strip() for t in grp['NFL Team'].unique() if str(t).strip() and str(t).strip() not in ['-', 'FA', 'NONE', 'NAN'])))
+                if len(nfl_tms) >= 3:
+                    pos_val = grp['Pos'].mode().iloc[0] if not grp['Pos'].empty else ""
+                    journeyman_records.append({
+                        'Player': player,
+                        'Pos': pos_val,
+                        'Fantasy Team': tm,
+                        'NFL Teams Count': len(nfl_tms),
+                        'NFL Teams': ", ".join(nfl_tms)
+                    })
+            if journeyman_records:
+                j_df = pd.DataFrame(journeyman_records).sort_values(['NFL Teams Count', 'Player'], ascending=[False, True]).reset_index(drop=True)
+                render_html_table(j_df[['Player', 'Pos', 'Fantasy Team', 'NFL Teams Count', 'NFL Teams']], left_align_cols=['NFL Teams'])
+            else:
+                st.info("No players found who started for the same fantasy team across 3 or more different NFL teams.")
         else:
             st.info("No player scoring records available.")
 
@@ -1579,4 +1668,4 @@ with tab_player:
             else:
                 st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-                
+            
