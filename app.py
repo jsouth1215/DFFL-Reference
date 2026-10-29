@@ -752,12 +752,14 @@ with tab1:
     szn_stats['PF'] = szn_stats['PF'].astype(int)
     szn_stats['PA'] = szn_stats['PA'].astype(int)
     
-    all_reg = games[games['Game_Type'] == 1]
-    pf_totals = all_reg.groupby(['Season', 'Team_Name']).agg(Actual_Points=('Actual_Points', 'sum'), Opp_Points=('Opp_Points', 'sum')).reset_index()
-    pf_totals['PF_Rank'] = pf_totals.groupby('Season')['Actual_Points'].rank(ascending=False, method='min').astype(int)
-    pf_totals['PA_Rank'] = pf_totals.groupby('Season')['Opp_Points'].rank(ascending=False, method='min').astype(int)
+    all_reg = games[games['Game_Type'] == 1].copy()
+    all_reg['Season_Str'] = all_reg['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     
-    pf_totals_team = pf_totals[pf_totals['Team_Name'] == selected_team][['Season', 'PF_Rank', 'PA_Rank']]
+    pf_totals = all_reg.groupby(['Season_Str', 'Team_Name']).agg(Actual_Points=('Actual_Points', 'sum'), Opp_Points=('Opp_Points', 'sum')).reset_index()
+    pf_totals['PF_Rank'] = pf_totals.groupby('Season_Str')['Actual_Points'].rank(ascending=False, method='min').astype(int)
+    pf_totals['PA_Rank'] = pf_totals.groupby('Season_Str')['Opp_Points'].rank(ascending=False, method='min').astype(int)
+    
+    pf_totals_team = pf_totals[pf_totals['Team_Name'] == selected_team][['Season_Str', 'PF_Rank', 'PA_Rank']].rename(columns={'Season_Str': 'Season'})
     szn_stats = pd.merge(szn_stats, pf_totals_team, on='Season', how='left')
     
     outcomes = []
@@ -771,6 +773,32 @@ with tab1:
     mgr_games['Season_Str'] = mgr_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     bags_per_szn = mgr_games.groupby('Season_Str')['Is_High_Scorer'].sum().to_dict()
     szn_stats['Weekly Bags'] = szn_stats['Season'].map(bags_per_szn).fillna(0).astype(int)
+    
+    # Calculate Expected Wins for all regular season matchups
+    all_reg['Weekly_Rank'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Actual_Points'].rank(ascending=False, method='average')
+    all_reg['N_Teams'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Team_Name'].transform('count')
+    all_reg['Exp_Win'] = all_reg.apply(
+        lambda r: (r['N_Teams'] - r['Weekly_Rank']) / (r['N_Teams'] - 1) if r['N_Teams'] > 1 else 0.0,
+        axis=1
+    )
+    
+    xw_totals = all_reg.groupby(['Season_Str', 'Team_Name'])['Exp_Win'].sum().reset_index()
+    xw_totals_team = xw_totals[xw_totals['Team_Name'] == selected_team].rename(columns={'Season_Str': 'Season', 'Exp_Win': 'Exp_Win_Total'})
+    
+    szn_stats = pd.merge(szn_stats, xw_totals_team[['Season', 'Exp_Win_Total']], on='Season', how='left')
+    szn_stats['Expected Wins'] = szn_stats['Exp_Win_Total'].fillna(0).apply(lambda x: f"{x:.1f}")
+    
+    def calc_luck(r):
+        w = r['W']
+        xw = r['Exp_Win_Total']
+        if pd.isna(xw):
+            return "0.0"
+        diff = w - xw
+        if abs(diff) < 0.05:
+            return "0.0"
+        return f"{diff:+.1f}"
+        
+    szn_stats['Luck Factor'] = szn_stats.apply(calc_luck, axis=1)
     
     rs_team_format = rs_team[['Season', 'RS_Rank']].copy()
     rs_team_format['Season'] = rs_team_format['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -789,7 +817,7 @@ with tab1:
     display_cols = [
         'Season', 'W', 'L', 'Win %', 'Standings Finish',
         'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank',
-        'Playoff Outcome', 'Weekly Bags',
+        'Playoff Outcome', 'Weekly Bags', 'Expected Wins', 'Luck Factor',
         'Top QB', 'Top RB', 'Top WR', 'Top TE'
     ]
     display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
@@ -1668,4 +1696,4 @@ with tab_player:
             else:
                 st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-            
+        
