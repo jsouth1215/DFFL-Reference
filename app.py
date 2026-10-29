@@ -705,6 +705,43 @@ def get_monday_comebacks(box_df, games):
         return res_df[cols_order]
     return pd.DataFrame()
 
+# ================= DATA INITIALIZATION =================
+st.title("🏈 DFFL History Hub")
+
+try:
+    games = load_data()
+    box_df = load_box_scores()
+    game_top_map = get_game_top_scorers(box_df)
+    
+    teams = sorted(games['Team_Name'].dropna().unique().tolist())
+    teams_no_cam = sorted([t for t in teams if str(t).strip().upper() != 'CAM'])
+    
+    seasons_list = sorted(
+        games['Season'].dropna().unique().tolist(),
+        key=lambda x: int(x) if str(x).isdigit() else 0,
+        reverse=True
+    )
+    
+    completed_playoff_seasons = set(
+        games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
+    )
+    
+    rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams)
+    
+    if rs_ranks_df.empty:
+        reg = games[games['Game_Type'] == 1]
+        szn_st = reg.groupby(['Season', 'Team_Name']).agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')).reset_index()
+        szn_st['Win %'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
+        szn_st = szn_st.sort_values(['Season', 'Win %', 'PF'], ascending=[False, False, False])
+        szn_st['RS_Rank'] = szn_st.groupby('Season').cumcount() + 1
+        rs_ranks_df = szn_st[['Season', 'Team_Name', 'RS_Rank']].copy()
+        
+    rs_ranks_df['Season'] = rs_ranks_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+
+except Exception as e:
+    st.error(f"Could not load data. Error: {e}")
+    st.stop()
+
 # ================= PAGE TAB ROUTING =================
 tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
     "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Detailed Player Scoring"
@@ -2014,4 +2051,4 @@ with tab_player:
             else:
                 st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-        
+            
