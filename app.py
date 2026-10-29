@@ -452,6 +452,11 @@ try:
         reverse=True
     )
     
+    # Exclude ongoing seasons that have not yet had any playoff games played
+    completed_playoff_seasons = set(
+        games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
+    )
+    
     rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams)
     
     if rs_ranks_df.empty:
@@ -468,8 +473,8 @@ except Exception as e:
     st.error(f"Could not load data. Error: {e}")
     st.stop()
 
-tab1, tab5, tab6, tab_player, tab2, tab3, tab4 = st.tabs([
-    "Franchise", "Schedule", "Box Scores", "Detailed Player Scoring", "Matchups", "Standings", "Records"
+tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
+    "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Detailed Player Scoring"
 ])
 
 with tab1:
@@ -558,6 +563,7 @@ with tab1:
     for _, row in rs_team.iterrows():
         szn_str = str(row['Season']).strip()
         if not szn_str.isdigit(): continue
+        if szn_str not in completed_playoff_seasons: continue
         szn = int(szn_str)
         rank = float(row['RS_Rank'])
         
@@ -879,207 +885,6 @@ with tab6:
         if b_team:
             display_box_score(b_season, b_week, b_team, box_df, games)
 
-with tab_player:
-    if box_df.empty:
-        st.warning("Player data not found. Please ensure 'espn_fantasy_complete_stats_2017_2026.xlsx' is located in this folder.")
-    else:
-        dps_c1, dps_c2, dps_c3 = st.columns([1.5, 1.5, 2])
-        dps_team = dps_c1.selectbox("Select Manager", teams, key="dps_team")
-        dps_year = dps_c2.selectbox("Season", ["All-Time"] + seasons_list, key="dps_year")
-        dps_pos_view = dps_c3.selectbox("Position View", ["All Positions", "QB", "RB", "WR", "TE", "K", "D/ST"], key="dps_pos")
-
-        b_clean = box_df.copy()
-        b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
-        b_clean['Team_Str'] = b_clean['Team_Name'].astype(str).str.strip()
-
-        el_games = games[(games['Team_Name'] == dps_team) & (games['Game_Type'].isin([1, 2, 4]))][['Season', 'Week', 'Team_Name']].drop_duplicates()
-        el_games['Season_Str'] = el_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        el_games['Week_Num'] = pd.to_numeric(el_games['Week'], errors='coerce').fillna(0).astype(int)
-        el_games['Team_Str'] = el_games['Team_Name'].astype(str).str.strip()
-
-        slot_c = 'Slot' if 'Slot' in b_clean.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_clean.columns else 'Position')
-        name_c = 'Player_Name' if 'Player_Name' in b_clean.columns else 'Player'
-        pts_c = 'Actual_Points' if 'Actual_Points' in b_clean.columns else 'Points'
-        pos_c = 'Position' if 'Position' in b_clean.columns else ('Pos' if 'Pos' in b_clean.columns else slot_c)
-
-        nfl_col = None
-        for cand in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team']:
-            if cand in b_clean.columns:
-                nfl_col = cand
-                break
-        if not nfl_col and 'Team' in b_clean.columns and 'Team_Name' in b_clean.columns:
-            nfl_col = 'Team'
-
-        b_clean['NFL_Team_Clean'] = b_clean[nfl_col].fillna('').astype(str).str.strip() if nfl_col else ""
-
-        is_starter = ~b_clean[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
-        starters = b_clean[(b_clean['Team_Str'] == dps_team) & is_starter]
-
-        counted_box = pd.merge(starters, el_games[['Season_Str', 'Week_Num', 'Team_Str']], on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
-
-        if dps_year != "All-Time":
-            counted_box = counted_box[counted_box['Season_Str'] == str(dps_year)]
-
-        def clean_pos_val(val):
-            p = str(val).strip().upper()
-            if p == 'QB': return 'QB'
-            if p == 'RB': return 'RB'
-            if p == 'WR': return 'WR'
-            if p == 'TE': return 'TE'
-            if p in ['K', 'PK']: return 'K'
-            if p in ['D/ST', 'DST', 'DEF', 'DP']: return 'D/ST'
-            return p
-
-        counted_box['Clean_Pos'] = counted_box[pos_c].apply(clean_pos_val)
-        counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
-
-        def find_col(cands, fallback_keywords=None, fallback_exclude=None):
-            for cand in cands:
-                cand_norm = cand.lower().replace('_', '').replace(' ', '')
-                for c in counted_box.columns:
-                    c_norm = str(c).lower().replace('_', '').replace(' ', '')
-                    if c_norm == cand_norm:
-                        return c
-            if fallback_keywords:
-                for c in counted_box.columns:
-                    c_str = str(c).lower().replace(' ', '_')
-                    if all(kw in c_str for kw in fallback_keywords):
-                        if fallback_exclude and any(ex in c_str for ex in fallback_exclude):
-                            continue
-                        return c
-            return None
-
-        col_pass_yds = find_col(['Passing_Yards', 'Pass_Yards', 'Passing_Yds', 'Pass_Yds'], fallback_keywords=['pass', 'yard'])
-        col_pass_td = find_col(['Passing_TDs', 'Passing_TD', 'Pass_TDs', 'Pass_TD', 'Passing_Touchdowns'], fallback_keywords=['pass', 'td'], fallback_exclude=['rush', 'rec', 'def'])
-        col_pass_int = find_col(['Passing_Interceptions', 'Passing_Int', 'Pass_Int', 'Interceptions', 'INT'], fallback_keywords=['int'], fallback_exclude=['def'])
-        col_rush_yds = find_col(['Rushing_Yards', 'Rush_Yards', 'Rushing_Yds', 'Rush_Yds'], fallback_keywords=['rush', 'yard'])
-        col_rush_td = find_col(['Rushing_TDs', 'Rushing_TD', 'Rush_TDs', 'Rush_TD', 'Rushing_Touchdowns'], fallback_keywords=['rush', 'td'], fallback_exclude=['pass', 'rec', 'def'])
-        col_rec = find_col(['Receptions', 'Reception', 'Rec', 'Catches'], fallback_keywords=['rec'], fallback_exclude=['yard', 'td', 'touchdown', 'pass', 'rush', 'def', 'fum', 'int'])
-        col_rec_yds = find_col(['Receiving_Yards', 'Receiving_Yds', 'Rec_Yards', 'Rec_Yds'], fallback_keywords=['rec', 'yard'], fallback_exclude=['pass', 'rush'])
-        col_rec_td = find_col(
-            ['Receiving_TDs', 'Receiving_TD', 'Rec_TDs', 'Rec_TD', 'Receiving_Touchdowns', 'Receiving_Touchdown', 'Rec_Touchdowns', 'Rec_Touchdown', 'TD_Receiving', 'TD_Rec'],
-            fallback_keywords=['rec', 'td'],
-            fallback_exclude=['pass', 'rush', 'def', 'int', 'return', 'fum']
-        )
-        if not col_rec_td:
-            col_rec_td = find_col([], fallback_keywords=['rec', 'touchdown'], fallback_exclude=['pass', 'rush', 'def', 'int', 'return', 'fum'])
-
-        col_sacks = find_col(['Sacks', 'Sack'])
-        col_def_int = find_col(['Defensive_Interceptions', 'Def_INT', 'Defensive_Int'], fallback_keywords=['def', 'int'])
-        col_def_td = find_col(['Defensive_TDs', 'Defensive_TD', 'Def_TD', 'Def_TDs'], fallback_keywords=['def', 'td'])
-        col_fum_rec = find_col(['Fumbles_Recovered', 'Fum_Rec', 'FR'], fallback_keywords=['fum', 'rec'])
-        col_fgm = find_col(['Field_Goals_Made', 'FG_Made', 'FGM'], fallback_keywords=['fg', 'made'])
-        col_xpm = find_col(['Extra_Points_Made', 'XP_Made', 'XPM'], fallback_keywords=['xp', 'made'])
-
-        def get_stat_sum(grp, col):
-            if col and col in grp.columns:
-                return int(round(pd.to_numeric(grp[col], errors='coerce').fillna(0).sum()))
-            return 0
-
-        def build_pos_table(target_pos):
-            pos_data = counted_box[counted_box['Clean_Pos'] == target_pos].copy()
-            if pos_data.empty:
-                return pd.DataFrame()
-
-            rows = []
-            for player, grp in pos_data.groupby(name_c):
-                tot_pts = pd.to_numeric(grp[pts_c], errors='coerce').fillna(0).sum()
-                if tot_pts <= 0:
-                    continue
-                starts = len(grp)
-                ppg = tot_pts / starts if starts > 0 else 0.0
-
-                nfl_teams_list = sorted(list(set(t for t in grp['NFL_Team_Clean'].tolist() if t)))
-                nfl_tm_str = ", ".join(nfl_teams_list) if nfl_teams_list else "-"
-
-                row_item = {
-                    'Player': player,
-                    'NFL Team': nfl_tm_str,
-                    'Starts': starts,
-                    'Points_Num': tot_pts,
-                    'Points': f"{tot_pts:.1f}",
-                    'PPG': f"{ppg:.1f}"
-                }
-
-                if target_pos == 'QB':
-                    row_item['Pass Yds'] = get_stat_sum(grp, col_pass_yds)
-                    row_item['Pass TD'] = get_stat_sum(grp, col_pass_td)
-                    row_item['INT'] = get_stat_sum(grp, col_pass_int)
-                    row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
-                    row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
-                elif target_pos == 'RB':
-                    row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
-                    row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
-                    row_item['Rec'] = get_stat_sum(grp, col_rec)
-                    row_item['Rec Yds'] = get_stat_sum(grp, col_rec_yds)
-                    row_item['Rec TD'] = get_stat_sum(grp, col_rec_td)
-                elif target_pos in ['WR', 'TE']:
-                    row_item['Rec'] = get_stat_sum(grp, col_rec)
-                    row_item['Rec Yds'] = get_stat_sum(grp, col_rec_yds)
-                    row_item['Rec TD'] = get_stat_sum(grp, col_rec_td)
-                    if target_pos == 'WR':
-                        row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
-                        row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
-                elif target_pos == 'K':
-                    if col_fgm: row_item['FGM'] = get_stat_sum(grp, col_fgm)
-                    if col_xpm: row_item['XPM'] = get_stat_sum(grp, col_xpm)
-                elif target_pos == 'D/ST':
-                    if col_sacks: row_item['Sacks'] = get_stat_sum(grp, col_sacks)
-                    if col_def_int: row_item['INT'] = get_stat_sum(grp, col_def_int)
-                    if col_fum_rec: row_item['FR'] = get_stat_sum(grp, col_fum_rec)
-                    if col_def_td: row_item['TD'] = get_stat_sum(grp, col_def_td)
-
-                rows.append(row_item)
-
-            if not rows:
-                return pd.DataFrame()
-
-            df_pos = pd.DataFrame(rows).sort_values(['Points_Num', 'Starts'], ascending=[False, False]).reset_index(drop=True)
-            df_pos['Rank'] = df_pos.index + 1
-
-            if target_pos == 'QB':
-                col_order = ['Rank', 'Player', 'NFL Team', 'Starts', 'Pass Yds', 'Pass TD', 'INT', 'Rush Yds', 'Rush TD', 'Points', 'PPG']
-            elif target_pos == 'RB':
-                col_order = ['Rank', 'Player', 'NFL Team', 'Starts', 'Rush Yds', 'Rush TD', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG']
-            elif target_pos == 'WR':
-                col_order = ['Rank', 'Player', 'NFL Team', 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Rush Yds', 'Rush TD', 'Points', 'PPG']
-            elif target_pos == 'TE':
-                col_order = ['Rank', 'Player', 'NFL Team', 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG']
-            elif target_pos == 'K':
-                col_order = ['Rank', 'Player', 'NFL Team', 'Starts']
-                if col_fgm: col_order.append('FGM')
-                if col_xpm: col_order.append('XPM')
-                col_order.extend(['Points', 'PPG'])
-            elif target_pos == 'D/ST':
-                col_order = ['Rank', 'Player', 'Starts']
-                if col_sacks: col_order.append('Sacks')
-                if col_def_int: col_order.append('INT')
-                if col_fum_rec: col_order.append('FR')
-                if col_def_td: col_order.append('TD')
-                col_order.extend(['Points', 'PPG'])
-
-            return df_pos[[c for c in col_order if c in df_pos.columns]]
-
-        positions_to_render = ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST'] if dps_pos_view == "All Positions" else [dps_pos_view]
-        pos_titles = {
-            'QB': 'Quarterbacks (QB)',
-            'RB': 'Running Backs (RB)',
-            'WR': 'Wide Receivers (WR)',
-            'TE': 'Tight Ends (TE)',
-            'K': 'Kickers (K)',
-            'D/ST': 'Defense / Special Teams (D/ST)'
-        }
-
-        for p_code in positions_to_render:
-            st.write(f"### {pos_titles[p_code]}")
-            table_df = build_pos_table(p_code)
-            if not table_df.empty:
-                render_html_table(table_df)
-            else:
-                st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
-            st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-
 with tab2:
     top_col1, top_col2 = st.columns(2)
     with top_col1:
@@ -1348,6 +1153,7 @@ with tab4:
             for _, r in rs_team.iterrows():
                 szn_str = str(r['Season']).strip()
                 if not szn_str.isdigit(): continue
+                if szn_str not in completed_playoff_seasons: continue
                 szn = int(szn_str)
                 rank = float(r['RS_Rank'])
                 if pd.isna(rank): continue
@@ -1435,4 +1241,215 @@ with tab4:
             )
         po_html += '</tbody></table>'
         st.markdown(po_html, unsafe_allow_html=True)
-        
+
+with tab_player:
+    if box_df.empty:
+        st.warning("Player data not found. Please ensure 'espn_fantasy_complete_stats_2017_2026.xlsx' is located in this folder.")
+    else:
+        dps_c1, dps_c2, dps_c3 = st.columns([1.5, 1.5, 2])
+        dps_team = dps_c1.selectbox("Select Manager", teams, key="dps_team")
+        dps_year = dps_c2.selectbox("Season", ["All-Time"] + seasons_list, key="dps_year")
+        dps_pos_view = dps_c3.selectbox("Position View", ["All Positions", "QB", "RB", "WR", "TE", "K", "D/ST"], key="dps_pos")
+
+        col_dyn_header = "Years" if dps_year == "All-Time" else "Weeks"
+
+        b_clean = box_df.copy()
+        b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
+        b_clean['Team_Str'] = b_clean['Team_Name'].astype(str).str.strip()
+
+        el_games = games[(games['Team_Name'] == dps_team) & (games['Game_Type'].isin([1, 2, 4]))][['Season', 'Week', 'Team_Name']].drop_duplicates()
+        el_games['Season_Str'] = el_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        el_games['Week_Num'] = pd.to_numeric(el_games['Week'], errors='coerce').fillna(0).astype(int)
+        el_games['Team_Str'] = el_games['Team_Name'].astype(str).str.strip()
+
+        slot_c = 'Slot' if 'Slot' in b_clean.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_clean.columns else 'Position')
+        name_c = 'Player_Name' if 'Player_Name' in b_clean.columns else 'Player'
+        pts_c = 'Actual_Points' if 'Actual_Points' in b_clean.columns else 'Points'
+        pos_c = 'Position' if 'Position' in b_clean.columns else ('Pos' if 'Pos' in b_clean.columns else slot_c)
+
+        nfl_col = None
+        for cand in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team']:
+            if cand in b_clean.columns:
+                nfl_col = cand
+                break
+        if not nfl_col and 'Team' in b_clean.columns and 'Team_Name' in b_clean.columns:
+            nfl_col = 'Team'
+
+        b_clean['NFL_Team_Clean'] = b_clean[nfl_col].fillna('').astype(str).str.strip() if nfl_col else ""
+
+        is_starter = ~b_clean[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+        starters = b_clean[(b_clean['Team_Str'] == dps_team) & is_starter]
+
+        counted_box = pd.merge(starters, el_games[['Season_Str', 'Week_Num', 'Team_Str']], on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
+
+        if dps_year != "All-Time":
+            counted_box = counted_box[counted_box['Season_Str'] == str(dps_year)]
+
+        def clean_pos_val(val):
+            p = str(val).strip().upper()
+            if p == 'QB': return 'QB'
+            if p == 'RB': return 'RB'
+            if p == 'WR': return 'WR'
+            if p == 'TE': return 'TE'
+            if p in ['K', 'PK']: return 'K'
+            if p in ['D/ST', 'DST', 'DEF', 'DP']: return 'D/ST'
+            return p
+
+        counted_box['Clean_Pos'] = counted_box[pos_c].apply(clean_pos_val)
+        counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
+
+        def find_col(cands, fallback_keywords=None, fallback_exclude=None):
+            for cand in cands:
+                cand_norm = cand.lower().replace('_', '').replace(' ', '')
+                for c in counted_box.columns:
+                    c_norm = str(c).lower().replace('_', '').replace(' ', '')
+                    if c_norm == cand_norm:
+                        return c
+            if fallback_keywords:
+                for c in counted_box.columns:
+                    c_str = str(c).lower().replace(' ', '_')
+                    if all(kw in c_str for kw in fallback_keywords):
+                        if fallback_exclude and any(ex in c_str for ex in fallback_exclude):
+                            continue
+                        return c
+            return None
+
+        col_pass_yds = find_col(['Passing_Yards', 'Pass_Yards', 'Passing_Yds', 'Pass_Yds'], fallback_keywords=['pass', 'yard'])
+        col_pass_td = find_col(['Passing_TDs', 'Passing_TD', 'Pass_TDs', 'Pass_TD', 'Passing_Touchdowns'], fallback_keywords=['pass', 'td'], fallback_exclude=['rush', 'rec', 'def'])
+        col_pass_int = find_col(['Passing_Interceptions', 'Passing_Int', 'Pass_Int', 'Interceptions', 'INT'], fallback_keywords=['int'], fallback_exclude=['def'])
+        col_rush_yds = find_col(['Rushing_Yards', 'Rush_Yards', 'Rushing_Yds', 'Rush_Yds'], fallback_keywords=['rush', 'yard'])
+        col_rush_td = find_col(['Rushing_TDs', 'Rushing_TD', 'Rush_TDs', 'Rush_TD', 'Rushing_Touchdowns'], fallback_keywords=['rush', 'td'], fallback_exclude=['pass', 'rec', 'def'])
+        col_rec = find_col(['Receptions', 'Reception', 'Rec', 'Catches'], fallback_keywords=['rec'], fallback_exclude=['yard', 'td', 'touchdown', 'pass', 'rush', 'def', 'fum', 'int'])
+        col_rec_yds = find_col(['Receiving_Yards', 'Receiving_Yds', 'Rec_Yards', 'Rec_Yds'], fallback_keywords=['rec', 'yard'], fallback_exclude=['pass', 'rush'])
+        col_rec_td = find_col(
+            ['Receiving_TDs', 'Receiving_TD', 'Rec_TDs', 'Rec_TD', 'Receiving_Touchdowns', 'Receiving_Touchdown', 'Rec_Touchdowns', 'Rec_Touchdown', 'TD_Receiving', 'TD_Rec'],
+            fallback_keywords=['rec', 'td'],
+            fallback_exclude=['pass', 'rush', 'def', 'int', 'return', 'fum']
+        )
+        if not col_rec_td:
+            col_rec_td = find_col([], fallback_keywords=['rec', 'touchdown'], fallback_exclude=['pass', 'rush', 'def', 'int', 'return', 'fum'])
+
+        col_sacks = find_col(['Sacks', 'Sack'])
+        col_def_int = find_col(['Defensive_Interceptions', 'Def_INT', 'Defensive_Int'], fallback_keywords=['def', 'int'])
+        col_def_td = find_col(['Defensive_TDs', 'Defensive_TD', 'Def_TD', 'Def_TDs'], fallback_keywords=['def', 'td'])
+        col_fum_rec = find_col(['Fumbles_Recovered', 'Fum_Rec', 'FR'], fallback_keywords=['fum', 'rec'])
+        col_fgm = find_col(['Field_Goals_Made', 'FG_Made', 'FGM'], fallback_keywords=['fg', 'made'])
+        col_xpm = find_col(['Extra_Points_Made', 'XP_Made', 'XPM'], fallback_keywords=['xp', 'made'])
+
+        def get_stat_sum(grp, col):
+            if col and col in grp.columns:
+                return int(round(pd.to_numeric(grp[col], errors='coerce').fillna(0).sum()))
+            return 0
+
+        def build_pos_table(target_pos):
+            pos_data = counted_box[counted_box['Clean_Pos'] == target_pos].copy()
+            if pos_data.empty:
+                return pd.DataFrame()
+
+            rows = []
+            for player, grp in pos_data.groupby(name_c):
+                tot_pts = pd.to_numeric(grp[pts_c], errors='coerce').fillna(0).sum()
+                if tot_pts <= 0:
+                    continue
+                starts = len(grp)
+                ppg = tot_pts / starts if starts > 0 else 0.0
+
+                nfl_teams_list = sorted(list(set(t for t in grp['NFL_Team_Clean'].tolist() if t)))
+                nfl_tm_str = ", ".join(nfl_teams_list) if nfl_teams_list else "-"
+
+                if dps_year == "All-Time":
+                    seasons_arr = sorted(list(set(str(s) for s in grp['Season_Str'].dropna().unique())), key=lambda x: int(x) if x.isdigit() else 0)
+                    time_str = ", ".join(seasons_arr)
+                else:
+                    weeks_arr = sorted(list(set(int(w) for w in grp['Week_Num'].dropna().unique())))
+                    time_str = ", ".join(str(w) for w in weeks_arr)
+
+                row_item = {
+                    'Player': player,
+                    'NFL Team': nfl_tm_str,
+                    col_dyn_header: time_str,
+                    'Starts': starts,
+                    'Points_Num': tot_pts,
+                    'Points': f"{tot_pts:.1f}",
+                    'PPG': f"{ppg:.1f}"
+                }
+
+                if target_pos == 'QB':
+                    row_item['Pass Yds'] = get_stat_sum(grp, col_pass_yds)
+                    row_item['Pass TD'] = get_stat_sum(grp, col_pass_td)
+                    row_item['INT'] = get_stat_sum(grp, col_pass_int)
+                    row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
+                    row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
+                elif target_pos == 'RB':
+                    row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
+                    row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
+                    row_item['Rec'] = get_stat_sum(grp, col_rec)
+                    row_item['Rec Yds'] = get_stat_sum(grp, col_rec_yds)
+                    row_item['Rec TD'] = get_stat_sum(grp, col_rec_td)
+                elif target_pos in ['WR', 'TE']:
+                    row_item['Rec'] = get_stat_sum(grp, col_rec)
+                    row_item['Rec Yds'] = get_stat_sum(grp, col_rec_yds)
+                    row_item['Rec TD'] = get_stat_sum(grp, col_rec_td)
+                    if target_pos == 'WR':
+                        row_item['Rush Yds'] = get_stat_sum(grp, col_rush_yds)
+                        row_item['Rush TD'] = get_stat_sum(grp, col_rush_td)
+                elif target_pos == 'K':
+                    if col_fgm: row_item['FGM'] = get_stat_sum(grp, col_fgm)
+                    if col_xpm: row_item['XPM'] = get_stat_sum(grp, col_xpm)
+                elif target_pos == 'D/ST':
+                    if col_sacks: row_item['Sacks'] = get_stat_sum(grp, col_sacks)
+                    if col_def_int: row_item['INT'] = get_stat_sum(grp, col_def_int)
+                    if col_fum_rec: row_item['FR'] = get_stat_sum(grp, col_fum_rec)
+                    if col_def_td: row_item['TD'] = get_stat_sum(grp, col_def_td)
+
+                rows.append(row_item)
+
+            if not rows:
+                return pd.DataFrame()
+
+            df_pos = pd.DataFrame(rows).sort_values(['Points_Num', 'Starts'], ascending=[False, False]).reset_index(drop=True)
+            df_pos['Rank'] = df_pos.index + 1
+
+            if target_pos == 'QB':
+                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Pass Yds', 'Pass TD', 'INT', 'Rush Yds', 'Rush TD', 'Points', 'PPG']
+            elif target_pos == 'RB':
+                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Rush Yds', 'Rush TD', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG']
+            elif target_pos == 'WR':
+                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Rush Yds', 'Rush TD', 'Points', 'PPG']
+            elif target_pos == 'TE':
+                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG']
+            elif target_pos == 'K':
+                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts']
+                if col_fgm: col_order.append('FGM')
+                if col_xpm: col_order.append('XPM')
+                col_order.extend(['Points', 'PPG'])
+            elif target_pos == 'D/ST':
+                col_order = ['Rank', 'Player', col_dyn_header, 'Starts']
+                if col_sacks: col_order.append('Sacks')
+                if col_def_int: col_order.append('INT')
+                if col_fum_rec: col_order.append('FR')
+                if col_def_td: col_order.append('TD')
+                col_order.extend(['Points', 'PPG'])
+
+            return df_pos[[c for c in col_order if c in df_pos.columns]]
+
+        positions_to_render = ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST'] if dps_pos_view == "All Positions" else [dps_pos_view]
+        pos_titles = {
+            'QB': 'Quarterbacks (QB)',
+            'RB': 'Running Backs (RB)',
+            'WR': 'Wide Receivers (WR)',
+            'TE': 'Tight Ends (TE)',
+            'K': 'Kickers (K)',
+            'D/ST': 'Defense / Special Teams (D/ST)'
+        }
+
+        for p_code in positions_to_render:
+            st.write(f"### {pos_titles[p_code]}")
+            table_df = build_pos_table(p_code)
+            if not table_df.empty:
+                render_html_table(table_df)
+            else:
+                st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
+            st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+            
