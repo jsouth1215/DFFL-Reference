@@ -568,595 +568,508 @@ def get_all_streaks_records(games):
             
     return pd.DataFrame(win_streaks), pd.DataFrame(loss_streaks)
 
-st.title("🏈 DFFL History Hub")
+with tab1:
+    selected_team = st.selectbox("Select Manager", teams, label_visibility="collapsed")
+    mgr_games = games[games['Team_Name'] == selected_team].sort_values(['Season_Num', 'Week_Num']).copy()
+    
+    mgr_games['Result'] = mgr_games.apply(lambda x: 'W' if x['W'] else ('L' if x['L'] else 'T'), axis=1)
+    
+    reg_season = mgr_games[mgr_games['Game_Type'] == 1]
+    playoffs = mgr_games[mgr_games['Game_Type'] == 2]
+    
+    tw, tl, tt = reg_season['W'].sum(), reg_season['L'].sum(), reg_season['T'].sum()
+    win_pct = tw / (tw + tl + tt) if (tw + tl + tt) > 0 else 0.0
+    win_pct_str = f"{win_pct:.3f}".replace("0.", ".", 1) if win_pct < 1 else f"{win_pct:.3f}"
+    
+    if not mgr_games.empty:
+        high_row = mgr_games.loc[mgr_games['Actual_Points'].idxmax()]
+        high_score_str = f"{high_row['Actual_Points']:.1f} ({str(high_row['Season']).replace('.0','')}, W{high_row['Week']})"
+    else:
+        high_score_str = "N/A"
+        
+    comp_games = mgr_games[mgr_games['Game_Type'].isin([1, 2])]
+    if not comp_games.empty:
+        comp_valid = comp_games[comp_games['Actual_Points'] > 0]
+        if not comp_valid.empty:
+            low_row = comp_valid.loc[comp_valid['Actual_Points'].idxmin()]
+            low_score_str = f"{low_row['Actual_Points']:.1f} ({str(low_row['Season']).replace('.0','')}, W{low_row['Week']})"
+        else:
+            low_score_str = "N/A"
+        
+        valid_opp_games = comp_games[comp_games['Opponent_Team_Name'].str.upper() != 'CAM']
+        if not valid_opp_games.empty:
+            opp_stats = valid_opp_games.groupby('Opponent_Team_Name').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum')).reset_index()
+            opp_stats['Games'] = opp_stats['W'] + opp_stats['L'] + opp_stats['T']
+            opp_stats = opp_stats[opp_stats['Games'] > 0]
+            
+            if not opp_stats.empty:
+                opp_stats['Win %'] = opp_stats['W'] / opp_stats['Games']
+                
+                def format_opp_list(df_sub):
+                    records = [f"{int(r['W'])}-{int(r['L'])}-{int(r['T'])}" if r['T'] > 0 else f"{int(r['W'])}-{int(r['L'])}" for _, r in df_sub.iterrows()]
+                    if len(set(records)) == 1:
+                        names = ", ".join(df_sub['Opponent_Team_Name'].tolist())
+                        return f"{names} ({records[0]})"
+                    else:
+                        items = [f"{r['Opponent_Team_Name']} ({rec})" for (_, r), rec in zip(df_sub.iterrows(), records)]
+                        return ", ".join(items)
 
-try:
-    games = load_data()
-    box_df = load_box_scores()
-    game_top_map = get_game_top_scorers(box_df)
+                max_wp = opp_stats['Win %'].max()
+                easiest_candidates = opp_stats[opp_stats['Win %'] == max_wp]
+                max_games_easiest = easiest_candidates['Games'].max()
+                easiest_final = easiest_candidates[easiest_candidates['Games'] == max_games_easiest]
+                easiest_str = format_opp_list(easiest_final)
+                
+                min_wp = opp_stats['Win %'].min()
+                toughest_candidates = opp_stats[opp_stats['Win %'] == min_wp]
+                max_games_toughest = toughest_candidates['Games'].max()
+                toughest_final = toughest_candidates[toughest_candidates['Games'] == max_games_toughest]
+                toughest_str = format_opp_list(toughest_final)
+            else:
+                easiest_str = "N/A"
+                toughest_str = "N/A"
+        else:
+            easiest_str = "N/A"
+            toughest_str = "N/A"
+    else:
+        low_score_str = "N/A"
+        easiest_str = "N/A"
+        toughest_str = "N/A"
     
-    teams = sorted(games['Team_Name'].dropna().unique().tolist())
-    teams_no_cam = sorted([t for t in teams if str(t).strip().upper() != 'CAM'])
+    pw, pl, pt = playoffs['W'].sum(), playoffs['L'].sum(), playoffs['T'].sum()
     
-    seasons_list = sorted(
-        games['Season'].dropna().unique().tolist(),
-        key=lambda x: int(x) if str(x).isdigit() else 0,
-        reverse=True
+    is_champ = playoffs['Playoff_Round'].astype(str).str.strip().str.lower().isin(['finals', 'championship'])
+    champs = playoffs[is_champ & (playoffs['W'] == 1)]
+    champ_years = sorted([str(s).replace('.0', '') for s in champs['Season'].unique()])
+    champ_str = f"{len(champ_years)} ({', '.join(champ_years)})" if champ_years else "0"
+    
+    high_scorer_count = mgr_games['Is_High_Scorer'].sum()
+    
+    longest_w, w_span, longest_l, l_span = get_detailed_streaks(mgr_games[mgr_games['Game_Type'].isin([1, 2])])
+    
+    rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team]
+    playoff_apps = 0
+    playoff_byes = 0
+    
+    for _, row in rs_team.iterrows():
+        szn_str = str(row['Season']).strip()
+        if not szn_str.isdigit(): continue
+        if szn_str not in completed_playoff_seasons: continue
+        szn = int(szn_str)
+        rank = float(row['RS_Rank'])
+        
+        if pd.isna(rank): continue
+        if szn == 2017 and rank <= 4:
+            playoff_apps += 1
+        elif szn > 2017 and rank <= 6:
+            playoff_apps += 1
+            
+        if szn >= 2018 and rank <= 2:
+            playoff_byes += 1
+            
+    all_time_qb_str = "N/A"
+    all_time_rb_str = "N/A"
+    all_time_wr_str = "N/A"
+    all_time_te_str = "N/A"
+    all_time_dst_str = "N/A"
+    all_time_k_str = "N/A"
+    top_qb_by_szn = {}
+    top_rb_by_szn = {}
+    top_wr_by_szn = {}
+    top_te_by_szn = {}
+    
+    if not box_df.empty:
+        slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
+        name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
+        pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+        pos_c = 'Position' if 'Position' in box_df.columns else ('Pos' if 'Pos' in box_df.columns else slot_c)
+        
+        if slot_c in box_df.columns and name_c in box_df.columns and pts_c in box_df.columns:
+            eligible_games = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name']].copy()
+            eligible_games['Season'] = eligible_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            eligible_games['Week'] = pd.to_numeric(eligible_games['Week'], errors='coerce').fillna(0).astype(int)
+            eligible_games['Team_Name'] = eligible_games['Team_Name'].astype(str).str.strip()
+            
+            box_eligible = box_df[box_df['Team_Name'] == selected_team].copy()
+            box_eligible['Season'] = box_eligible['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            box_eligible['Week'] = pd.to_numeric(box_eligible['Week'], errors='coerce').fillna(0).astype(int)
+            box_eligible['Team_Name'] = box_eligible['Team_Name'].astype(str).str.strip()
+            
+            is_starter = ~box_eligible[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+            starters_df = box_eligible[is_starter]
+            
+            counted_box = pd.merge(starters_df, eligible_games, on=['Season', 'Week', 'Team_Name'], how='inner')
+            
+            if not counted_box.empty:
+                counted_box[pts_c] = pd.to_numeric(counted_box[pts_c], errors='coerce').fillna(0)
+                counted_box['Clean_Pos'] = counted_box[pos_c].astype(str).str.strip().str.upper()
+                
+                def get_all_time_top(target_positions):
+                    pos_df = counted_box[counted_box['Clean_Pos'].isin(target_positions)]
+                    if pos_df.empty:
+                        return "N/A"
+                    p_totals = pos_df.groupby(name_c)[pts_c].sum().reset_index()
+                    if p_totals.empty:
+                        return "N/A"
+                    top_row = p_totals.sort_values(pts_c, ascending=False).iloc[0]
+                    return f"{top_row[name_c]} ({top_row[pts_c]:,.1f} pts)"
+                
+                all_time_qb_str = get_all_time_top(['QB'])
+                all_time_rb_str = get_all_time_top(['RB'])
+                all_time_wr_str = get_all_time_top(['WR'])
+                all_time_te_str = get_all_time_top(['TE'])
+                all_time_dst_str = get_all_time_top(['D/ST', 'DST', 'DEF', 'DP'])
+                all_time_k_str = get_all_time_top(['K', 'PK'])
+                
+                def get_top_by_pos(target_pos):
+                    pos_df = counted_box[counted_box['Clean_Pos'] == target_pos]
+                    if pos_df.empty:
+                        return {}
+                    szn_pts = pos_df.groupby(['Season', name_c])[pts_c].sum().reset_index()
+                    szn_pts = szn_pts.sort_values(['Season', pts_c], ascending=[True, False])
+                    top_per_szn = szn_pts.drop_duplicates(subset=['Season'], keep='first')
+                    return dict(zip(
+                        top_per_szn['Season'],
+                        top_per_szn.apply(lambda r: f"{r[name_c]} ({r[pts_c]:,.1f})", axis=1)
+                    ))
+                
+                top_qb_by_szn = get_top_by_pos('QB')
+                top_rb_by_szn = get_top_by_pos('RB')
+                top_wr_by_szn = get_top_by_pos('WR')
+                top_te_by_szn = get_top_by_pos('TE')
+            
+    c_stat1, c_stat2, c_stat3 = st.columns(3)
+    with c_stat1:
+        st.markdown(f"**Championships:** {champ_str}")
+        st.markdown(f"**Reg. Season Record:** {tw}-{tl}-{tt} ({win_pct_str})")
+        st.markdown(f"**Playoff Record:** {pw}-{pl}-{pt}")
+        st.markdown(f"**Playoff Appearances:** {playoff_apps}")
+        st.markdown(f"**Playoff Byes:** {playoff_byes}")
+        st.markdown(f"**Weekly Bags Won:** {high_scorer_count}")
+    with c_stat2:
+        st.markdown(f"**Highest Scoring Game:** {high_score_str}")
+        st.markdown(f"**Lowest Scoring Game:** {low_score_str}")
+        st.markdown(f"**Easiest Opponent:** {easiest_str}")
+        st.markdown(f"**Toughest Opponent:** {toughest_str}")
+        st.markdown(f"**Longest Win Streak:** {longest_w} games ({w_span})")
+        st.markdown(f"**Longest Losing Streak:** {longest_l} games ({l_span})")
+    with c_stat3:
+        st.markdown(f"**Top Scoring QB:** {all_time_qb_str}")
+        st.markdown(f"**Top Scoring RB:** {all_time_rb_str}")
+        st.markdown(f"**Top Scoring WR:** {all_time_wr_str}")
+        st.markdown(f"**Top Scoring TE:** {all_time_te_str}")
+        st.markdown(f"**Top Scoring D/ST:** {all_time_dst_str}")
+        st.markdown(f"**Top Scoring K:** {all_time_k_str}")
+    st.divider()
+    
+    st.write("### Season-by-Season (Regular Season)")
+    szn_stats = reg_season.groupby('Season').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum'), PA=('Opp_Points', 'sum')).reset_index()
+    szn_stats['Win %'] = (szn_stats['W'] / (szn_stats['W'] + szn_stats['L'] + szn_stats['T'])).fillna(0)
+    szn_stats['Win %'] = szn_stats['Win %'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1 else f"{x:.3f}")
+    
+    szn_stats['Games'] = szn_stats['W'] + szn_stats['L'] + szn_stats['T']
+    szn_stats['PF/G'] = (szn_stats['PF'] / szn_stats['Games']).apply(lambda x: f"{x:.1f}")
+    szn_stats['PA/G'] = (szn_stats['PA'] / szn_stats['Games']).apply(lambda x: f"{x:.1f}")
+    
+    szn_stats['PF'] = szn_stats['PF'].astype(int)
+    szn_stats['PA'] = szn_stats['PA'].astype(int)
+    
+    all_reg = games[games['Game_Type'] == 1].copy()
+    all_reg['Season_Str'] = all_reg['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    
+    pf_totals = all_reg.groupby(['Season_Str', 'Team_Name']).agg(Actual_Points=('Actual_Points', 'sum'), Opp_Points=('Opp_Points', 'sum')).reset_index()
+    pf_totals['PF_Rank'] = pf_totals.groupby('Season_Str')['Actual_Points'].rank(ascending=False, method='min').astype(int)
+    pf_totals['PA_Rank'] = pf_totals.groupby('Season_Str')['Opp_Points'].rank(ascending=False, method='min').astype(int)
+    
+    pf_totals_team = pf_totals[pf_totals['Team_Name'] == selected_team][['Season_Str', 'PF_Rank', 'PA_Rank']].rename(columns={'Season_Str': 'Season'})
+    szn_stats = pd.merge(szn_stats, pf_totals_team, on='Season', how='left')
+    
+    outcomes = []
+    for s in szn_stats['Season']:
+        s_playoffs = playoffs[playoffs['Season'] == s]
+        outcomes.append(get_playoff_outcome(s_playoffs))
+    szn_stats['Playoff Outcome'] = outcomes
+    
+    szn_stats['Season'] = szn_stats['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    
+    mgr_games['Season_Str'] = mgr_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    bags_per_szn = mgr_games.groupby('Season_Str')['Is_High_Scorer'].sum().to_dict()
+    szn_stats['Weekly Bags'] = szn_stats['Season'].map(bags_per_szn).fillna(0).astype(int)
+    
+    all_reg['Weekly_Rank'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Actual_Points'].rank(ascending=False, method='average')
+    all_reg['N_Teams'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Team_Name'].transform('count')
+    all_reg['Exp_Win'] = all_reg.apply(
+        lambda r: (r['N_Teams'] - r['Weekly_Rank']) / (r['N_Teams'] - 1) if r['N_Teams'] > 1 else 0.0,
+        axis=1
     )
     
-    completed_playoff_seasons = set(
-        games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
+    xw_totals = all_reg.groupby(['Season_Str', 'Team_Name'])['Exp_Win'].sum().reset_index()
+    xw_totals_team = xw_totals[xw_totals['Team_Name'] == selected_team].rename(columns={'Season_Str': 'Season', 'Exp_Win': 'Exp_Win_Total'})
+    
+    szn_stats = pd.merge(szn_stats, xw_totals_team[['Season', 'Exp_Win_Total']], on='Season', how='left')
+    szn_stats['Expected Wins'] = szn_stats['Exp_Win_Total'].fillna(0).apply(lambda x: f"{x:.1f}")
+    
+    def calc_luck(r):
+        w = r['W']
+        xw = r['Exp_Win_Total']
+        if pd.isna(xw):
+            return "0.0"
+        diff = w - xw
+        if abs(diff) < 0.05:
+            return "0.0"
+        return f"{diff:+.1f}"
+        
+    szn_stats['Luck Factor'] = szn_stats.apply(calc_luck, axis=1)
+    
+    rs_team_format = rs_team[['Season', 'RS_Rank']].copy()
+    rs_team_format['Season'] = rs_team_format['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    
+    szn_stats = pd.merge(szn_stats, rs_team_format, on='Season', how='left')
+    
+    szn_stats['Standings Finish'] = szn_stats['RS_Rank'].apply(
+        lambda x: f"{int(x)}{'th' if 11 <= int(x) % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(int(x) % 10, 'th')}" if pd.notnull(x) else ""
     )
     
-    rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams)
+    szn_stats['Top QB'] = szn_stats['Season'].map(top_qb_by_szn).fillna("")
+    szn_stats['Top RB'] = szn_stats['Season'].map(top_rb_by_szn).fillna("")
+    szn_stats['Top WR'] = szn_stats['Season'].map(top_wr_by_szn).fillna("")
+    szn_stats['Top TE'] = szn_stats['Season'].map(top_te_by_szn).fillna("")
     
-    if rs_ranks_df.empty:
-        reg = games[games['Game_Type'] == 1]
-        szn_st = reg.groupby(['Season', 'Team_Name']).agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')).reset_index()
-        szn_st['Win %'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
-        szn_st = szn_st.sort_values(['Season', 'Win %', 'PF'], ascending=[False, False, False])
-        szn_st['RS_Rank'] = szn_st.groupby('Season').cumcount() + 1
-        rs_ranks_df = szn_st[['Season', 'Team_Name', 'RS_Rank']].copy()
-        
-    rs_ranks_df['Season'] = rs_ranks_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-
-except Exception as e:
-    st.error(f"Could not load data. Error: {e}")
-    st.stop()
-
-tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
-    "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Detailed Player Scoring"
-])
-
-with tab3:
-    selected_season = st.selectbox("Select Season", seasons_list, key='stnd_szn')
-    szn_data = games[(games['Season'] == str(selected_season)) & (games['Game_Type'] == 1)]
+    display_cols = [
+        'Season', 'W', 'L', 'Win %', 'Standings Finish',
+        'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank',
+        'Playoff Outcome', 'Weekly Bags', 'Expected Wins', 'Luck Factor',
+        'Top QB', 'Top RB', 'Top WR', 'Top TE'
+    ]
+    display_df = szn_stats.rename(columns={'PF_Rank': 'PF Rank', 'PA_Rank': 'PA Rank'})[display_cols].sort_values('Season', ascending=False)
     
-    if not szn_data.empty:
-        max_week = int(szn_data['Week_Num'].max())
-        selected_week = st.slider("Standings Through Week:", min_value=1, max_value=max_week, value=max_week)
+    def highlight_szn_cells(row):
+        styles = ['' for _ in row.index]
+        szn_val = str(row.get('Season', '')).replace('.0', '').strip()
+        if szn_val in ['2017', '2018']:
+            gray_cols = ['Weekly Bags', 'Top QB', 'Top RB', 'Top WR', 'Top TE']
+            for col in gray_cols:
+                if col in row.index:
+                    idx = row.index.get_loc(col)
+                    styles[idx] = 'background-color: #ebebeb; color: #888888;'
+        return styles
+
+    render_html_table(display_df, highlight_fn=highlight_szn_cells)
+    
+    st.divider()
+    st.write("### Playoff Game Log")
+    display_playoffs = playoffs.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False])
+    if not display_playoffs.empty:
+        display_playoffs['Season'] = display_playoffs['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        display_playoffs['Score'] = display_playoffs['Actual_Points'].round(1).astype(str) + " - " + display_playoffs['Opp_Points'].round(1).astype(str)
         
-        szn_games = szn_data[szn_data['Week_Num'] <= selected_week].copy()
+        po_display_df = display_playoffs[['Season', 'Week', 'Playoff_Round', 'Opponent_Team_Name', 'Result', 'Score']].rename(columns={'Opponent_Team_Name': 'Opponent', 'Playoff_Round': 'Round'})
+        render_html_table(po_display_df)
         
-        szn_games['Weekly_Rank'] = szn_games.groupby('Week_Num')['Actual_Points'].rank(ascending=False, method='average')
-        szn_games['N_Teams'] = szn_games.groupby('Week_Num')['Team_Name'].transform('count')
-        szn_games['Exp_Win'] = szn_games.apply(
-            lambda r: (r['N_Teams'] - r['Weekly_Rank']) / (r['N_Teams'] - 1) if r['N_Teams'] > 1 else 0.0,
-            axis=1
+        display_playoffs['Game_Label'] = display_playoffs['Season'] + " Week " + display_playoffs['Week'].astype(str) + " vs " + display_playoffs['Opponent_Team_Name']
+        view_po_wk = st.selectbox("Select Playoff Game to View Box Score:", ["Select..."] + display_playoffs['Game_Label'].tolist(), key="po_box")
+        if view_po_wk != "Select...":
+            po_row = display_playoffs[display_playoffs['Game_Label'] == view_po_wk].iloc[0]
+            display_box_score(po_row['Season'], po_row['Week'], selected_team, box_df, games)
+    else:
+        st.write("No playoff appearances on record.")
+        
+    st.divider()
+    st.write("### Head-to-Head vs. All Opponents")
+    all_opponents = sorted([t for t in teams if t != selected_team])
+    h2h_summary_list = []
+    for opp in all_opponents:
+        opp_games = games[(games['Team_Name'] == selected_team) & (games['Opponent_Team_Name'] == opp) & (games['Game_Type'].isin([1, 2]))]
+        if opp_games.empty:
+            continue
+        tot_w = int(opp_games['W'].sum())
+        tot_l = int(opp_games['L'].sum())
+        tot_t = int(opp_games['T'].sum())
+        tot_g = tot_w + tot_l + tot_t
+        win_p = tot_w / tot_g if tot_g > 0 else 0.0
+        win_p_str = f"{win_p:.3f}".replace("0.", ".", 1) if win_p < 1 else f"{win_p:.3f}"
+        pf_sum = int(round(opp_games['Actual_Points'].sum()))
+        pa_sum = int(round(opp_games['Opp_Points'].sum()))
+        
+        po_g = opp_games[opp_games['Game_Type'] == 2]
+        po_w = int(po_g['W'].sum())
+        po_l = int(po_g['L'].sum())
+        po_t = int(po_g['T'].sum())
+        if (po_w + po_l + po_t) > 0:
+            po_rec_str = f"{po_w}-{po_l}-{po_t}" if po_t > 0 else f"{po_w}-{po_l}"
+        else:
+            po_rec_str = "-"
+            
+        row_dict = {
+            'Opponent': opp,
+            'GP': tot_g,
+            'W': tot_w,
+            'L': tot_l,
+            'T': tot_t,
+            'Win_Pct_Raw': win_p,
+            'Win %': win_p_str,
+            'PF': pf_sum,
+            'PA': pa_sum,
+            'Playoff Record': po_rec_str
+        }
+        h2h_summary_list.append(row_dict)
+        
+    if h2h_summary_list:
+        h2h_summary_df = pd.DataFrame(h2h_summary_list)
+        h2h_summary_df = h2h_summary_df.sort_values(['Win_Pct_Raw', 'W', 'GP'], ascending=[False, False, False]).reset_index(drop=True)
+        disp_h2h_cols = ['Opponent', 'GP', 'W', 'L', 'Win %', 'PF', 'PA', 'Playoff Record']
+        render_html_table(h2h_summary_df[disp_h2h_cols])
+    else:
+        st.write("No head-to-head matchup history found.")
+
+with tab5:
+    col1, col2 = st.columns(2)
+    sched_season = col1.selectbox("Season", seasons_list, key='sched_szn')
+    sched_team = col2.selectbox("Manager", teams, key='sched_team')
+    
+    sched = games[(games['Season'] == str(sched_season)) & (games['Team_Name'] == sched_team)].sort_values(['Game_Type', 'Week_Num']).copy()
+    if not sched.empty:
+        type_mapping = {1: 'Regular Season', 2: 'Playoffs', 3: 'Consolation', 4: 'Playoff Bye'}
+        sched['Type'] = sched['Game_Type'].map(type_mapping)
+        
+        sched['Result'] = sched.apply(lambda x: 'BYE' if x['Game_Type'] == 4 else ('W' if x['W'] else ('L' if x['L'] else 'T')), axis=1)
+        
+        team_score_col = f'{sched_team} Score'
+        opp_score_col = 'Opponent Score'
+        
+        sched[team_score_col] = sched['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        sched[opp_score_col] = sched.apply(
+            lambda x: f"{float(x['Opp_Points']):.1f}" if x['Game_Type'] != 4 else "-", axis=1
         )
         
-        szn_st = szn_games.groupby('Team_Name').agg(
-            W=('W', 'sum'),
-            L=('L', 'sum'),
-            T=('T', 'sum'),
-            PF=('Actual_Points', 'sum'),
-            PA=('Opp_Points', 'sum'),
-            Exp_Win_Total=('Exp_Win', 'sum')
-        ).reset_index()
-        
-        szn_st['Win_Pct_Raw'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
-        szn_st = szn_st.sort_values(['Win_Pct_Raw', 'PF'], ascending=[False, False]).reset_index(drop=True)
-        
-        szn_st['Rank'] = szn_st.index + 1
-        szn_st['Rank'] = szn_st['Rank'].apply(lambda x: f"{x}{'th' if 11 <= x % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(x % 10, 'th')}")
-        szn_st['Win %'] = szn_st['Win_Pct_Raw'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1 else f"{x:.3f}")
-        szn_st['PF'] = szn_st['PF'].apply(lambda x: f"{float(x):.1f}")
-        szn_st['PA'] = szn_st['PA'].apply(lambda x: f"{float(x):.1f}")
-        szn_st['Expected Wins'] = szn_st['Exp_Win_Total'].apply(lambda x: f"{float(x):.1f}")
-        
-        def calc_stnd_luck(r):
-            w = r['W']
-            xw = r['Exp_Win_Total']
-            diff = w - xw
-            if abs(diff) < 0.05:
+        def calc_rel_margin(r):
+            if r['Game_Type'] == 4:
+                return "-"
+            diff = r['Actual_Points'] - r['Opp_Points']
+            if diff > 0:
+                return f"+{diff:.1f}"
+            elif diff < 0:
+                return f"{diff:.1f}"
+            else:
                 return "0.0"
-            return f"{diff:+.1f}"
-            
-        szn_st['Luck Factor'] = szn_st.apply(calc_stnd_luck, axis=1)
-        szn_st = szn_st.rename(columns={'Team_Name': 'Team'})
+                
+        sched['Margin'] = sched.apply(calc_rel_margin, axis=1)
+        sched['Opponent'] = sched['Opponent_Team_Name']
         
-        disp_cols = ['Rank', 'Team', 'W', 'L', 'T', 'Win %', 'PF', 'PA', 'Expected Wins', 'Luck Factor']
-        render_html_table(szn_st[disp_cols])
+        s_szn_str = str(sched_season).replace('.0', '').strip()
+        sched['Team_Str'] = sched['Team_Name'].astype(str).str.strip()
+        sched['Opp_Str'] = sched['Opponent_Team_Name'].astype(str).str.strip()
+        sched['Week_Num_Int'] = pd.to_numeric(sched['Week'], errors='coerce').fillna(0).astype(int)
+        
+        sched[f'{sched_team} Top Scorer'] = sched.apply(
+            lambda r: game_top_map.get((s_szn_str, r['Week_Num_Int'], r['Team_Str']), ""), axis=1
+        )
+        sched['Opponent Top Scorer'] = sched.apply(
+            lambda r: game_top_map.get((s_szn_str, r['Week_Num_Int'], r['Opp_Str']), "") if r['Opp_Str'].upper() != 'BYE' else "", axis=1
+        )
+        
+        cols = ['Week', 'Type', 'Opponent', 'Result', team_score_col, opp_score_col, 'Margin', f'{sched_team} Top Scorer', 'Opponent Top Scorer']
+        disp_sched = sched[cols]
+        
+        def highlight_sched_winners(row):
+            styles = ['' for _ in row.index]
+            col_team_idx = row.index.get_loc(team_score_col)
+            col_opp_idx = row.index.get_loc(opp_score_col)
+            if row['Result'] == 'W':
+                styles[col_team_idx] = 'font-weight: bold;'
+            elif row['Result'] == 'L':
+                styles[col_opp_idx] = 'font-weight: bold;'
+            return styles
+        
+        render_html_table(disp_sched, highlight_sched_winners)
+        
+        view_sch_wk = st.selectbox("Select Week to View Box Score:", ["Select..."] + sched['Week'].unique().tolist(), key="sch_box")
+        if view_sch_wk != "Select...":
+            display_box_score(sched_season, view_sch_wk, sched_team, box_df, games)
     else:
-        st.write("No regular season data found.")
+        st.write("No schedule found.")
 
-with tab4:
-    rec_categories = {
-        "Game Records": [
-            "Highest Scoring Weeks",
-            "Lowest Scoring Weeks",
-            "Lowest Scoring Weekly Bags",
-            "Biggest Blowouts",
-            "Closest Games"
-        ],
-        "Player Records": [
-            "Highest Scoring Players",
-            "Lowest Scoring Players",
-            "Highest Scoring Stacks",
-            "Most Fantasy Teams Started For",
-            "Started on Same Fantasy Team for 3+ NFL Teams"
-        ],
-        "Season Records": [
-            "Highest Season Luck Factor",
-            "Lowest Season Luck Factor",
-            "Most Points Per Game in a Season",
-            "Least Points Per Game in a Season",
-            "Longest Win Streak",
-            "Longest Losing Streak"
-        ],
-        "Franchise Records": [
-            "Team Record - Highest Score",
-            "Team Record - Lowest Score",
-            "Weekly Bag by Team",
-            "Weekly Last Place Score by Team",
-            "Playoff Record by Team"
-        ]
-    }
-    
-    if 'Top_2_Game' in games.columns:
-        rec_categories["Game Records"].append("Top 2 Matchups")
-    if 'Bottom_2_Game' in games.columns:
-        rec_categories["Game Records"].append("Bottom 2 Matchups")
-
-    selected_group = st.radio("Record Category:", list(rec_categories.keys()), horizontal=True, key="rec_cat_group")
-    record_type = st.radio("Select Record:", rec_categories[selected_group], horizontal=True, key="rec_sub_type")
-    st.write("---")
-    
-    bag_seasons = sorted(
-        [str(s).replace('.0', '').strip() for s in games['Season'].unique() if str(s).replace('.0', '').strip().isdigit() and int(str(s).replace('.0', '').strip()) >= 2019],
-        key=lambda x: int(x)
-    )
-    
-    lp_seasons = sorted(
-        [str(s).replace('.0', '').strip() for s in games['Season'].unique() if str(s).replace('.0', '').strip().isdigit() and int(str(s).replace('.0', '').strip()) >= 2017],
-        key=lambda x: int(x)
-    )
-
-    all_reg_completed = games[(games['Game_Type'] == 1) & (games['Season'].isin(completed_playoff_seasons))].copy()
-    if not all_reg_completed.empty:
-        all_reg_completed['Season_Str'] = all_reg_completed['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        all_reg_completed['Weekly_Rank'] = all_reg_completed.groupby(['Season_Str', 'Week_Num'])['Actual_Points'].rank(ascending=False, method='average')
-        all_reg_completed['N_Teams'] = all_reg_completed.groupby(['Season_Str', 'Week_Num'])['Team_Name'].transform('count')
-        all_reg_completed['Exp_Win'] = all_reg_completed.apply(
-            lambda r: (r['N_Teams'] - r['Weekly_Rank']) / (r['N_Teams'] - 1) if r['N_Teams'] > 1 else 0.0,
-            axis=1
-        )
-        
-        season_team_agg = all_reg_completed.groupby(['Season_Str', 'Team_Name']).agg(
-            W=('W', 'sum'),
-            L=('L', 'sum'),
-            T=('T', 'sum'),
-            PF=('Actual_Points', 'sum'),
-            Exp_Win_Total=('Exp_Win', 'sum'),
-            Games_Count=('W', 'count')
-        ).reset_index()
-        
-        season_team_agg['Record'] = season_team_agg.apply(
-            lambda r: f"{int(r['W'])}-{int(r['L'])}-{int(r['T'])}" if r['T'] > 0 else f"{int(r['W'])}-{int(r['L'])}",
-            axis=1
-        )
-        season_team_agg['Luck_Num'] = season_team_agg['W'] - season_team_agg['Exp_Win_Total']
-        season_team_agg['Expected Wins'] = season_team_agg['Exp_Win_Total'].apply(lambda x: f"{float(x):.1f}")
-        season_team_agg['Luck Factor'] = season_team_agg['Luck_Num'].apply(lambda x: "0.0" if abs(x) < 0.05 else f"{x:+.1f}")
-        season_team_agg['PF_Formatted'] = season_team_agg['PF'].apply(lambda x: f"{float(x):.1f}")
-        season_team_agg['PPG_Num'] = season_team_agg['PF'] / season_team_agg['Games_Count']
-        season_team_agg['PF/G'] = season_team_agg['PPG_Num'].apply(lambda x: f"{float(x):.1f}")
-        season_team_agg = season_team_agg.rename(columns={'Season_Str': 'Season', 'Team_Name': 'Team'})
+with tab6:
+    if box_df.empty:
+        st.warning("Player data not found. Please ensure 'espn_fantasy_complete_stats_2017_2026.xlsx' is located in this folder to view box scores.")
     else:
-        season_team_agg = pd.DataFrame()
-    
-    if record_type == "Highest Scoring Weeks":
-        top_scores = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=False).head(15).copy().reset_index(drop=True)
-        top_scores['Rank'] = top_scores.index + 1
-        top_scores['Season'] = top_scores['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        top_scores['Actual_Points'] = top_scores['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-        top_scores = top_scores.rename(columns={'Team_Name': 'Team', 'Actual_Points': 'Points', 'Opponent_Team_Name': 'Opponent'})
-        render_html_table(top_scores[['Rank', 'Season', 'Week', 'Team', 'Points', 'Opponent']])
+        c1, c2, c3 = st.columns(3)
+        b_season = c1.selectbox("Season", seasons_list, key="b_szn")
+        avail_weeks = sorted(box_df[box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)]['Week'].dropna().unique().tolist())
+        b_week = c2.selectbox("Week", avail_weeks, key="b_wk")
+        avail_teams = sorted(box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)) & (box_df['Week'] == b_week)]['Team_Name'].dropna().unique().tolist())
+        b_team = c3.selectbox("Manager", avail_teams, key="b_tm")
         
-    elif record_type == "Lowest Scoring Weeks":
-        low_scores = games[(games['Actual_Points'] > 0) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].sort_values('Actual_Points', ascending=True).head(15).copy().reset_index(drop=True)
-        low_scores['Rank'] = low_scores.index + 1
-        low_scores['Season'] = low_scores['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        low_scores['Actual_Points'] = low_scores['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-        low_scores = low_scores.rename(columns={'Team_Name': 'Team', 'Actual_Points': 'Points', 'Opponent_Team_Name': 'Opponent'})
-        render_html_table(low_scores[['Rank', 'Season', 'Week', 'Team', 'Points', 'Opponent']])
-        
-    elif record_type == "Lowest Scoring Weekly Bags":
-        bag_games = games[games['Is_High_Scorer']].copy()
-        if not bag_games.empty:
-            low_bags = bag_games.sort_values('Actual_Points', ascending=True).head(15).copy().reset_index(drop=True)
-            low_bags['Rank'] = low_bags.index + 1
-            low_bags['Season'] = low_bags['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            low_bags['Actual_Points'] = low_bags['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-            low_bags = low_bags.rename(columns={'Team_Name': 'Team', 'Actual_Points': 'Points', 'Opponent_Team_Name': 'Opponent'})
-            render_html_table(low_bags[['Rank', 'Season', 'Week', 'Team', 'Points', 'Opponent']])
-        else:
-            st.write("No weekly bag records found.")
-            
-    elif record_type == "Biggest Blowouts":
-        blowouts = games[(games['W'] == 1) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=False).head(15).copy().reset_index(drop=True)
-        blowouts['Rank'] = blowouts.index + 1
-        blowouts['Season'] = blowouts['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        blowouts['Actual_Points'] = blowouts['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-        blowouts['Opp_Points'] = blowouts['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
-        blowouts['Margin'] = blowouts['Margin'].apply(lambda x: f"{float(x):.1f}")
-        blowouts = blowouts.rename(columns={'Team_Name': 'Winner', 'Actual_Points': 'Winner Pts', 'Opponent_Team_Name': 'Loser', 'Opp_Points': 'Loser Pts'})
-        render_html_table(blowouts[['Rank', 'Season', 'Week', 'Winner', 'Winner Pts', 'Loser', 'Loser Pts', 'Margin']])
-        
-    elif record_type == "Closest Games":
-        closest = games[(games['W'] == 1) & (games['Margin'] > 0) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=True).head(15).copy().reset_index(drop=True)
-        closest['Rank'] = closest.index + 1
-        closest['Season'] = closest['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        closest['Actual_Points'] = closest['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-        closest['Opp_Points'] = closest['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
-        closest['Margin'] = closest['Margin'].apply(lambda x: f"{float(x):.1f}")
-        closest = closest.rename(columns={'Team_Name': 'Winner', 'Actual_Points': 'Winner Pts', 'Opponent_Team_Name': 'Loser', 'Opp_Points': 'Loser Pts'})
-        render_html_table(closest[['Rank', 'Season', 'Week', 'Winner', 'Winner Pts', 'Loser', 'Loser Pts', 'Margin']])
-        
-    elif record_type == "Top 2 Matchups":
-        if 'Top_2_Game' in games.columns:
-            top2_mask = games['Top_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
-            top2 = games[top2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
-            top2['Season'] = top2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            top2['Actual_Points'] = top2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-            top2['Opp_Points'] = top2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
-            top2['Margin'] = top2['Margin'].apply(lambda x: f"{float(x):.1f}")
-            top2 = top2.rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'})
-            render_html_table(top2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
-        
-    elif record_type == "Bottom 2 Matchups":
-        if 'Bottom_2_Game' in games.columns:
-            bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
-            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week'])
-            bot2['Season'] = bot2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            bot2['Actual_Points'] = bot2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-            bot2['Opp_Points'] = bot2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
-            bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
-            bot2 = bot2.rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'})
-            render_html_table(bot2[['Season', 'Week', 'Team 1', 'Team 1 Pts', 'Team 2', 'Team 2 Pts', 'Margin']])
+        if b_team:
+            display_box_score(b_season, b_week, b_team, box_df, games)
 
-    elif record_type == "Highest Scoring Players":
-        p_perf = get_starter_performances(box_df, games)
-        if not p_perf.empty:
-            top_players = p_perf.sort_values('Points_Num', ascending=False).head(15).copy().reset_index(drop=True)
-            top_players['Rank'] = top_players.index + 1
-            top_players['Points'] = top_players['Points_Num'].apply(lambda x: f"{float(x):.1f}")
-            cols_disp = ['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']
-            render_html_table(top_players[[c for c in cols_disp if c in top_players.columns]])
-        else:
-            st.info("No player scoring records available.")
-
-    elif record_type == "Lowest Scoring Players":
-        p_perf = get_starter_performances(box_df, games)
-        if not p_perf.empty:
-            st.write("### Lowest Scoring Starters (All Positions)")
-            low_all = p_perf.sort_values('Points_Num', ascending=True).head(15).copy().reset_index(drop=True)
-            low_all['Rank'] = low_all.index + 1
-            low_all['Points'] = low_all['Points_Num'].apply(lambda x: f"{float(x):.1f}")
-            cols_disp = ['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']
-            render_html_table(low_all[[c for c in cols_disp if c in low_all.columns]])
-
-            st.write("### Negative Point Starters (Non-Defense)")
-            non_dst_neg = p_perf[(~p_perf['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])) & (p_perf['Points_Num'] < 0)].sort_values('Points_Num', ascending=True).copy().reset_index(drop=True)
-            if not non_dst_neg.empty:
-                non_dst_neg['Rank'] = non_dst_neg.index + 1
-                non_dst_neg['Points'] = non_dst_neg['Points_Num'].apply(lambda x: f"{float(x):.1f}")
-                render_html_table(non_dst_neg[[c for c in cols_disp if c in non_dst_neg.columns]])
+with tab2:
+    top_col1, top_col2 = st.columns(2)
+    with top_col1:
+        team_a = st.selectbox("Team A", teams)
+        avail_opps = [t for t in teams if t != team_a]
+        team_b = st.selectbox("Team B", avail_opps)
+        
+    h2h_games = games[(games['Team_Name'] == team_a) & (games['Opponent_Team_Name'] == team_b) & (games['Game_Type'].isin([1, 2]))].copy()
+    if not h2h_games.empty:
+        w, l, t = h2h_games['W'].sum(), h2h_games['L'].sum(), h2h_games['T'].sum()
+        
+        po_h2h = h2h_games[h2h_games['Game_Type'] == 2]
+        pw, pl, pt = po_h2h['W'].sum(), po_h2h['L'].sum(), po_h2h['T'].sum()
+        
+        with top_col2:
+            st.write(f"### {team_a} vs. {team_b}")
+            if w > l:
+                st.markdown(f"**Series Leader:** {team_a} leads {w}-{l}-{t}" if t > 0 else f"**Series Leader:** {team_a} leads {w}-{l}")
+            elif l > w:
+                st.markdown(f"**Series Leader:** {team_b} leads {l}-{w}-{t}" if t > 0 else f"**Series Leader:** {team_b} leads {l}-{w}")
             else:
-                st.info("No non-defense starters have scored negative points.")
-        else:
-            st.info("No player scoring records available.")
-
-    elif record_type == "Highest Scoring Stacks":
-        p_perf = get_starter_performances(box_df, games)
-        if not p_perf.empty:
-            stacks_list = []
-            for (s, w, tm), g_df in p_perf.groupby(['Season', 'Week', 'Team']):
-                qbs = g_df[g_df['Pos'] == 'QB']
-                catchers = g_df[g_df['Pos'].isin(['WR', 'TE'])]
-                if qbs.empty or catchers.empty:
-                    continue
-                for _, qb_r in qbs.iterrows():
-                    qb_nfl = str(qb_r['NFL Team']).strip()
-                    if not qb_nfl or qb_nfl in ['-', 'FA']:
-                        continue
-                    same_team_catchers = catchers[catchers['NFL Team'].astype(str).str.strip() == qb_nfl]
-                    for _, c_r in same_team_catchers.iterrows():
-                        comb_pts = float(qb_r['Points_Num']) + float(c_r['Points_Num'])
-                        stacks_list.append({
-                            'QB': f"{qb_r['Player']} ({float(qb_r['Points_Num']):.1f})",
-                            'Pass Catcher': f"{c_r['Player']} ({float(c_r['Points_Num']):.1f})",
-                            'Pos': c_r['Pos'],
-                            'NFL Team': qb_nfl,
-                            'Combined_Num': comb_pts,
-                            'Combined Pts': f"{comb_pts:.1f}",
-                            'Season': s,
-                            'Week': w,
-                            'Team': tm,
-                            'Opponent': qb_r['Opponent'],
-                            'Outcome': qb_r['Outcome']
-                        })
-            if stacks_list:
-                stacks_df = pd.DataFrame(stacks_list).sort_values('Combined_Num', ascending=False).head(15).reset_index(drop=True)
-                stacks_df['Rank'] = stacks_df.index + 1
-                cols_stk = ['Rank', 'QB', 'Pass Catcher', 'Pos', 'NFL Team', 'Combined Pts', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']
-                render_html_table(stacks_df[cols_stk])
+                st.markdown(f"**Series Leader:** Tied {w}-{l}-{t}" if t > 0 else f"**Series Leader:** Tied {w}-{l}")
+                
+            if (pw + pl + pt) == 0:
+                st.markdown("**Playoff Record:** No playoff matchups have occurred")
+            elif pw > pl:
+                st.markdown(f"**Playoff Record:** {team_a} leads {pw}-{pl}-{pt}" if pt > 0 else f"**Playoff Record:** {team_a} leads {pw}-{pl}")
+            elif pl > pw:
+                st.markdown(f"**Playoff Record:** {team_b} leads {pl}-{pw}-{pt}" if pt > 0 else f"**Playoff Record:** {team_b} leads {pl}-{pw}")
             else:
-                st.info("No starting QB/WR or QB/TE same-team stacks found.")
-        else:
-            st.info("No player scoring records available.")
-
-    elif record_type == "Most Fantasy Teams Started For":
-        p_perf = get_starter_performances(box_df, games)
-        if not p_perf.empty:
-            non_dst = p_perf[~p_perf['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])].copy()
-            travelers = []
-            for player, grp in non_dst.groupby('Player'):
-                f_teams = sorted(list(set(str(t).strip() for t in grp['Team'].unique() if str(t).strip())))
-                if len(f_teams) > 1:
-                    pos_val = grp['Pos'].mode().iloc[0] if not grp['Pos'].empty else ""
-                    travelers.append({
-                        'Player': player,
-                        'Pos': pos_val,
-                        'Teams Count': len(f_teams),
-                        'Fantasy Teams': ", ".join(f_teams)
-                    })
-            if travelers:
-                trav_df = pd.DataFrame(travelers).sort_values(['Teams Count', 'Player'], ascending=[False, True]).head(15).reset_index(drop=True)
-                trav_df['Rank'] = trav_df.index + 1
-                render_html_table(trav_df[['Rank', 'Player', 'Pos', 'Teams Count', 'Fantasy Teams']], left_align_cols=['Fantasy Teams'])
-            else:
-                st.info("No players found starting for multiple fantasy teams.")
-        else:
-            st.info("No player scoring records available.")
-
-    elif record_type == "Started on Same Fantasy Team for 3+ NFL Teams":
-        p_perf = get_starter_performances(box_df, games)
-        if not p_perf.empty:
-            non_dst = p_perf[~p_perf['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])].copy()
-            journeyman_records = []
-            for (player, tm), grp in non_dst.groupby(['Player', 'Team']):
-                nfl_tms = sorted(list(set(str(t).strip() for t in grp['NFL Team'].unique() if str(t).strip() and str(t).strip() not in ['-', 'FA', 'NONE', 'NAN'])))
-                if len(nfl_tms) >= 3:
-                    pos_val = grp['Pos'].mode().iloc[0] if not grp['Pos'].empty else ""
-                    journeyman_records.append({
-                        'Player': player,
-                        'Pos': pos_val,
-                        'Fantasy Team': tm,
-                        'NFL Teams Count': len(nfl_tms),
-                        'NFL Teams': ", ".join(nfl_tms)
-                    })
-            if journeyman_records:
-                j_df = pd.DataFrame(journeyman_records).sort_values(['NFL Teams Count', 'Player'], ascending=[False, True]).reset_index(drop=True)
-                render_html_table(j_df[['Player', 'Pos', 'Fantasy Team', 'NFL Teams Count', 'NFL Teams']], left_align_cols=['NFL Teams'])
-            else:
-                st.info("No players found who started for the same fantasy team across 3 or more different NFL teams.")
-        else:
-            st.info("No player scoring records available.")
-
-    elif record_type == "Highest Season Luck Factor":
-        if not season_team_agg.empty:
-            top_luck = season_team_agg.sort_values('Luck_Num', ascending=False).head(15).reset_index(drop=True)
-            top_luck['Rank'] = top_luck.index + 1
-            render_html_table(top_luck[['Rank', 'Season', 'Team', 'Record', 'Expected Wins', 'Luck Factor']])
-        else:
-            st.info("No completed season records found.")
-
-    elif record_type == "Lowest Season Luck Factor":
-        if not season_team_agg.empty:
-            low_luck = season_team_agg.sort_values('Luck_Num', ascending=True).head(15).reset_index(drop=True)
-            low_luck['Rank'] = low_luck.index + 1
-            render_html_table(low_luck[['Rank', 'Season', 'Team', 'Record', 'Expected Wins', 'Luck Factor']])
-        else:
-            st.info("No completed season records found.")
-
-    elif record_type == "Most Points Per Game in a Season":
-        if not season_team_agg.empty:
-            top_ppg = season_team_agg.sort_values('PPG_Num', ascending=False).head(15).reset_index(drop=True)
-            top_ppg['Rank'] = top_ppg.index + 1
-            top_ppg['PF'] = top_ppg['PF_Formatted']
-            render_html_table(top_ppg[['Rank', 'Season', 'Team', 'Record', 'PF/G', 'PF']])
-        else:
-            st.info("No completed season records found.")
-
-    elif record_type == "Least Points Per Game in a Season":
-        if not season_team_agg.empty:
-            sub_least = season_team_agg[season_team_agg['Season'] != '2017'].copy()
-            low_ppg = sub_least.sort_values('PPG_Num', ascending=True).head(15).reset_index(drop=True)
-            low_ppg['Rank'] = low_ppg.index + 1
-            low_ppg['PF'] = low_ppg['PF_Formatted']
-            render_html_table(low_ppg[['Rank', 'Season', 'Team', 'Record', 'PF/G', 'PF']])
-        else:
-            st.info("No completed season records found.")
-
-    elif record_type == "Longest Win Streak":
-        w_df, _ = get_all_streaks_records(games)
-        if not w_df.empty:
-            top_wins = w_df.sort_values(['Length', 'Season'], ascending=[False, False]).head(15).reset_index(drop=True)
-            top_wins['Rank'] = top_wins.index + 1
-            top_wins = top_wins.rename(columns={'Length': 'Streak'})
-            render_html_table(top_wins[['Rank', 'Team', 'Season', 'Streak', 'Span']])
-        else:
-            st.info("No streak records found.")
-
-    elif record_type == "Longest Losing Streak":
-        _, l_df = get_all_streaks_records(games)
-        if not l_df.empty:
-            top_loss = l_df.sort_values(['Length', 'Season'], ascending=[False, False]).head(15).reset_index(drop=True)
-            top_loss['Rank'] = top_loss.index + 1
-            top_loss = top_loss.rename(columns={'Length': 'Streak'})
-            render_html_table(top_loss[['Rank', 'Team', 'Season', 'Streak', 'Span']])
-        else:
-            st.info("No streak records found.")
-
-    elif record_type == "Team Record - Highest Score":
-        high_scores_list = []
-        for t in teams_no_cam:
-            t_games = games[games['Team_Name'] == t]
-            if not t_games.empty:
-                best_r = t_games.loc[t_games['Actual_Points'].idxmax()]
-                high_scores_list.append({
-                    'Team': t,
-                    'Points_Num': float(best_r['Actual_Points']),
-                    'Points': f"{float(best_r['Actual_Points']):.1f}",
-                    'Season': str(best_r['Season']).replace('.0', '').strip(),
-                    'Week': best_r['Week'],
-                    'Opponent': best_r['Opponent_Team_Name']
-                })
-        if high_scores_list:
-            high_df = pd.DataFrame(high_scores_list).sort_values('Points_Num', ascending=False).reset_index(drop=True)
-            high_df['Rank'] = high_df.index + 1
-            render_html_table(high_df[['Rank', 'Team', 'Points', 'Season', 'Week', 'Opponent']])
-
-    elif record_type == "Team Record - Lowest Score":
-        low_scores_list = []
-        for t in teams_no_cam:
-            t_games = games[(games['Team_Name'] == t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points'] > 0)]
-            if not t_games.empty:
-                low_r = t_games.loc[t_games['Actual_Points'].idxmin()]
-                low_scores_list.append({
-                    'Team': t,
-                    'Points_Num': float(low_r['Actual_Points']),
-                    'Points': f"{float(low_r['Actual_Points']):.1f}",
-                    'Season': str(low_r['Season']).replace('.0', '').strip(),
-                    'Week': low_r['Week'],
-                    'Opponent': low_r['Opponent_Team_Name']
-                })
-        if low_scores_list:
-            low_df = pd.DataFrame(low_scores_list).sort_values('Points_Num', ascending=True).reset_index(drop=True)
-            low_df['Rank'] = low_df.index + 1
-            render_html_table(low_df[['Rank', 'Team', 'Points', 'Season', 'Week', 'Opponent']])
-
-    elif record_type == "Weekly Bag by Team":
-        bag_data = []
-        for t in teams_no_cam:
-            row = {'Team': t}
-            tot = 0
-            for s in bag_seasons:
-                cnt = int(games[(games['Team_Name'] == t) & (games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == s) & (games['Is_High_Scorer'])]['Is_High_Scorer'].sum())
-                row[s] = cnt
-                tot += cnt
-            row['Total'] = tot
-            bag_data.append(row)
-        bag_df = pd.DataFrame(bag_data).sort_values(['Total', 'Team'], ascending=[False, True]).reset_index(drop=True)
-        render_html_table(bag_df[['Team'] + bag_seasons + ['Total']])
-
-    elif record_type == "Weekly Last Place Score by Team":
-        reg_games = games[(games['Game_Type'] == 1) & (games['Season_Num'] >= 2017)].copy()
-        if not reg_games.empty:
-            min_pts = reg_games.groupby(['Season', 'Week'])['Actual_Points'].transform('min')
-            reg_games['Is_Low_Scorer'] = (reg_games['Actual_Points'] == min_pts)
-            
-            lp_data = []
-            for t in teams:
-                row = {'Team': t}
-                tot = 0
-                for s in lp_seasons:
-                    cnt = int(reg_games[(reg_games['Team_Name'] == t) & (reg_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == s)]['Is_Low_Scorer'].sum())
-                    row[s] = cnt
-                    tot += cnt
-                row['Total'] = tot
-                lp_data.append(row)
-            lp_df = pd.DataFrame(lp_data).sort_values(['Total', 'Team'], ascending=[False, True]).reset_index(drop=True)
-            render_html_table(lp_df[['Team'] + lp_seasons + ['Total']])
-
-    elif record_type == "Playoff Record by Team":
-        po_records_list = []
-        for t in teams_no_cam:
-            rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == t]
-            apps = 0
-            byes = 0
-            for _, r in rs_team.iterrows():
-                szn_str = str(r['Season']).strip()
-                if not szn_str.isdigit(): continue
-                if szn_str not in completed_playoff_seasons: continue
-                szn = int(szn_str)
-                rank = float(r['RS_Rank'])
-                if pd.isna(rank): continue
-                if szn == 2017 and rank <= 4:
-                    apps += 1
-                elif szn > 2017 and rank <= 6:
-                    apps += 1
-                if szn >= 2018 and rank <= 2:
-                    byes += 1
-                    
-            po_games = games[(games['Team_Name'] == t) & (games['Game_Type'] == 2)]
-            round_str = po_games['Playoff_Round'].astype(str).str.strip().str.lower()
-            
-            qf_games = po_games[round_str.str.contains('quarter')]
-            qf_w = int(qf_games['W'].sum())
-            qf_l = int(qf_games['L'].sum())
-            
-            sf_games = po_games[round_str.str.contains('semi')]
-            sf_w = int(sf_games['W'].sum())
-            sf_l = int(sf_games['L'].sum())
-            
-            f_games = po_games[round_str.str.contains('final|champ') & ~round_str.str.contains('quarter|semi')]
-            f_w = int(f_games['W'].sum())
-            f_l = int(f_games['L'].sum())
-            
-            tot_w = qf_w + sf_w + f_w
-            tot_l = qf_l + sf_l + f_l
-            
-            po_records_list.append({
-                'Team': t,
-                'Appearances': apps,
-                'Byes': byes,
-                'Total_W': tot_w,
-                'Total_L': tot_l,
-                'QF_W': qf_w,
-                'QF_L': qf_l,
-                'SF_W': sf_w,
-                'SF_L': sf_l,
-                'F_W': f_w,
-                'F_L': f_l
-            })
-            
-        po_df = pd.DataFrame(po_records_list).sort_values(['Appearances', 'Total_W', 'Byes'], ascending=[False, False, False]).reset_index(drop=True)
+                st.markdown(f"**Playoff Record:** Tied {pw}-{pl}-{pt}" if pt > 0 else f"**Playoff Record:** Tied {pw}-{pl}")
+                
+        st.divider()
         
-        po_html = (
-            '<table style="width: 100%; border-collapse: collapse; text-align: center;">'
-            '<thead>'
-            '<tr>'
-            '<th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Team</th>'
-            '<th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Playoff Appearances</th>'
-            '<th rowspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Byes</th>'
-            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Total Postseason</th>'
-            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Quarterfinals</th>'
-            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Semifinals</th>'
-            '<th colspan="2" style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Finals</th>'
-            '</tr>'
-            '<tr>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Win</th>'
-            '<th style="text-align: center; padding: 6px 8px; border: 1px solid #e6e6e6;">Loss</th>'
-            '</tr>'
-            '</thead>'
-            '<tbody>'
+        display_h2h = h2h_games.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).copy()
+        display_h2h['Season_Str'] = display_h2h['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        display_h2h['Season'] = display_h2h['Season_Str']
+        display_h2h['Winner'] = display_h2h.apply(lambda x: x['Team_Name'] if x['W'] == 1 else (x['Opponent_Team_Name'] if x['L'] == 1 else 'Tie'), axis=1)
+        display_h2h['Type'] = display_h2h['Game_Type'].map({1: 'Regular Season', 2: 'Playoffs'}).fillna(display_h2h['Game_Type_Str'])
+        
+        display_h2h[f'{team_a} Pts'] = display_h2h['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+        display_h2h[f'{team_b} Pts'] = display_h2h['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+        display_h2h['Margin'] = display_h2h['Margin'].apply(lambda x: f"{float(x):.1f}")
+        
+        display_h2h[f'{team_a} Top Scorer'] = display_h2h.apply(
+            lambda r: game_top_map.get((r['Season_Str'], int(r['Week_Num']), str(team_a).strip()), ""), axis=1
         )
-        for _, r in po_df.iterrows():
-            po_html += (
-                '<tr>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Team"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Appearances"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Byes"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Total_W"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["Total_L"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["QF_W"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["QF_L"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["SF_W"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["SF_L"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["F_W"]}</td>'
-                f'<td style="padding: 6px 8px; border: 1px solid #e6e6e6; text-align: center;">{r["F_L"]}</td>'
-                '</tr>'
-            )
-        po_html += '</tbody></table>'
-        st.markdown(po_html, unsafe_allow_html=True)
+        display_h2h[f'{team_b} Top Scorer'] = display_h2h.apply(
+            lambda r: game_top_map.get((r['Season_Str'], int(r['Week_Num']), str(team_b).strip()), ""), axis=1
+        )
+        
+        cols = ['Season', 'Week', 'Type', 'Winner', f'{team_a} Pts', f'{team_b} Pts', 'Margin', f'{team_a} Top Scorer', f'{team_b} Top Scorer']
+        disp_table = display_h2h[cols]
+        
+        def highlight_winners(row):
+            styles = ['' for _ in row.index]
+            col_a_idx = row.index.get_loc(f'{team_a} Pts')
+            col_b_idx = row.index.get_loc(f'{team_b} Pts')
+            if row['Winner'] == team_a:
+                styles[col_a_idx] = 'font-weight: bold;'
+            elif row['Winner'] == team_b:
+                styles[col_b_idx] = 'font-weight: bold;'
+            return styles
+        
+        render_html_table(disp_table, highlight_winners)
+    else:
+        st.write("No matchups found between these teams.")
 
 with tab_player:
     if box_df.empty:
@@ -1386,4 +1299,4 @@ with tab_player:
             else:
                 st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-            
+        
