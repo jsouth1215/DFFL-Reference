@@ -31,6 +31,36 @@ def load_box_scores():
     except:
         return pd.DataFrame()
 
+@st.cache_data(ttl=86400)
+def load_nfl_monday_teams():
+    lookup = set()
+    try:
+        url = "https://github.com/nflverse/nflverse-data/releases/download/schedules/schedules.csv"
+        sched = pd.read_csv(url, usecols=['season', 'week', 'weekday', 'away_team', 'home_team', 'gameday'])
+        mon_mask = sched['weekday'].fillna('').astype(str).str.strip().str.capitalize() == 'Monday'
+        if 'gameday' in sched.columns:
+            try:
+                mon_mask = mon_mask | (pd.to_datetime(sched['gameday']).dt.weekday == 0)
+            except:
+                pass
+        mon_games = sched[mon_mask]
+        alias_map = {
+            'WSH': 'WAS', 'WAS': 'WSH', 'JAX': 'JAC', 'JAC': 'JAX',
+            'OAK': 'LV', 'LV': 'OAK', 'LA': 'LAR', 'LAR': 'LA',
+            'SD': 'LAC', 'LAC': 'SD'
+        }
+        for _, r in mon_games.iterrows():
+            s = str(r['season']).strip()
+            w = int(r['week'])
+            for tm_col in ['away_team', 'home_team']:
+                tm = str(r[tm_col]).strip().upper()
+                lookup.add((s, w, tm))
+                if tm in alias_map:
+                    lookup.add((s, w, alias_map[tm]))
+    except Exception:
+        pass
+    return lookup
+
 @st.cache_data(ttl=600)
 def get_game_top_scorers(box_df):
     if box_df.empty:
@@ -566,42 +596,116 @@ def get_all_streaks_records(games):
             
     return pd.DataFrame(win_streaks), pd.DataFrame(loss_streaks)
 
-st.title("🏈 DFFL History Hub")
+def get_monday_comebacks(box_df, games):
+    if box_df.empty or games.empty:
+        return pd.DataFrame()
+    
+    b_c = box_df.copy()
+    b_c['Season_Str'] = b_c['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    b_c['Week_Num'] = pd.to_numeric(b_c['Week'], errors='coerce').fillna(0).astype(int)
+    b_c['Team_Str'] = b_c['Team_Name'].astype(str).str.strip()
+    
+    slot_col = 'Slot' if 'Slot' in b_c.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_c.columns else 'Position')
+    name_col = 'Player_Name' if 'Player_Name' in b_c.columns else 'Player'
+    pts_col = 'Actual_Points' if 'Actual_Points' in b_c.columns else 'Points'
+    
+    nfl_c = None
+    for cand in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team']:
+        if cand in b_c.columns:
+            nfl_c = cand
+            break
+    if not nfl_c and 'Team' in b_c.columns and 'Team_Name' in b_c.columns:
+        nfl_c = 'Team'
+    b_c['NFL_Team_Clean'] = b_c[nfl_c].fillna('').astype(str).str.strip().str.upper() if nfl_c else ""
+    
+    date_col = next((c for c in b_c.columns if str(c).lower().strip() in [
+        'game_date', 'date', 'game_day', 'day', 'day_of_week', 'dayofweek', 'weekday', 'game_time', 'kickoff', 'start_time'
+    ]), None)
+    
+    nfl_mon_lookup = load_nfl_monday_teams()
+    
+    def is_monday_row(r):
+        if date_col and pd.notnull(r[date_col]):
+            val = str(r[date_col]).strip()
+            if any(m in val.lower() for m in ['mon', 'monday']):
+                return True
+            try:
+                dt = pd.to_datetime(val)
+                return dt.weekday() == 0
+            except:
+                pass
+        s = r['Season_Str']
+        w = r['Week_Num']
+        t = r['NFL_Team_Clean']
+        return (s, w, t) in nfl_mon_lookup
 
-try:
-    games = load_data()
-    box_df = load_box_scores()
-    game_top_map = get_game_top_scorers(box_df)
+    is_start = ~b_c[slot_col].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+    start_df = b_c[is_start].copy()
+    start_df['Points_Num'] = pd.to_numeric(start_df[pts_col], errors='coerce').fillna(0)
+    start_df['Is_Monday'] = start_df.apply(is_monday_row, axis=1)
     
-    teams = sorted(games['Team_Name'].dropna().unique().tolist())
-    teams_no_cam = sorted([t for t in teams if str(t).strip().upper() != 'CAM'])
+    comp_matchups = games[games['Game_Type'].isin([1, 2]) & (games['W'] == 1)].copy()
+    comp_matchups['Season_Str'] = comp_matchups['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    comp_matchups['Week_Num'] = pd.to_numeric(comp_matchups['Week'], errors='coerce').fillna(0).astype(int)
     
-    seasons_list = sorted(
-        games['Season'].dropna().unique().tolist(),
-        key=lambda x: int(x) if str(x).isdigit() else 0,
-        reverse=True
-    )
+    comebacks = []
     
-    completed_playoff_seasons = set(
-        games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
-    )
-    
-    rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams)
-    
-    if rs_ranks_df.empty:
-        reg = games[games['Game_Type'] == 1]
-        szn_st = reg.groupby(['Season', 'Team_Name']).agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')).reset_index()
-        szn_st['Win %'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
-        szn_st = szn_st.sort_values(['Season', 'Win %', 'PF'], ascending=[False, False, False])
-        szn_st['RS_Rank'] = szn_st.groupby('Season').cumcount() + 1
-        rs_ranks_df = szn_st[['Season', 'Team_Name', 'RS_Rank']].copy()
+    for _, m in comp_matchups.iterrows():
+        s = m['Season_Str']
+        w = m['Week_Num']
+        winner = str(m['Team_Name']).strip()
+        loser = str(m['Opponent_Team_Name']).strip()
+        win_final_pts = float(m['Actual_Points'])
+        los_final_pts = float(m['Opp_Points'])
         
-    rs_ranks_df['Season'] = rs_ranks_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        win_roster = start_df[(start_df['Season_Str'] == s) & (start_df['Week_Num'] == w) & (start_df['Team_Str'] == winner)]
+        los_roster = start_df[(start_df['Season_Str'] == s) & (start_df['Week_Num'] == w) & (start_df['Team_Str'] == loser)]
+        
+        if win_roster.empty and los_roster.empty:
+            continue
+            
+        win_mon = win_roster[win_roster['Is_Monday']]
+        los_mon = los_roster[los_roster['Is_Monday']]
+        
+        if win_mon.empty:
+            continue
+            
+        win_sun_pts = win_roster[~win_roster['Is_Monday']]['Points_Num'].sum()
+        los_sun_pts = los_roster[~los_roster['Is_Monday']]['Points_Num'].sum()
+        
+        if los_sun_pts > win_sun_pts:
+            deficit = los_sun_pts - win_sun_pts
+            
+            def make_player_str(df_sub):
+                if df_sub.empty:
+                    return "-"
+                df_sorted = df_sub.sort_values('Points_Num', ascending=False)
+                items = [f"{r[name_col]} ({float(r['Points_Num']):.1f})" for _, r in df_sorted.iterrows()]
+                return ", ".join(items)
+                
+            comebacks.append({
+                'Deficit_Num': deficit,
+                'Deficit Overcome': f"{deficit:.1f}",
+                'Final Score': f"{win_final_pts:.1f} - {los_final_pts:.1f}",
+                'Winner': winner,
+                'Loser': loser,
+                'Season': s,
+                'Week': w,
+                'Winning Team Monday Players': make_player_str(win_mon),
+                'Losing Team Monday Players': make_player_str(los_mon)
+            })
+            
+    if comebacks:
+        res_df = pd.DataFrame(comebacks).sort_values('Deficit_Num', ascending=False).head(15).reset_index(drop=True)
+        res_df['Rank'] = res_df.index + 1
+        cols_order = [
+            'Rank', 'Deficit Overcome', 'Final Score', 'Winner', 'Loser',
+            'Season', 'Week', 'Winning Team Monday Players', 'Losing Team Monday Players'
+        ]
+        return res_df[cols_order]
+    return pd.DataFrame()
 
-except Exception as e:
-    st.error(f"Could not load data. Error: {e}")
-    st.stop()
-
+# ================= PAGE TAB ROUTING =================
 tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
     "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Detailed Player Scoring"
 ])
@@ -1167,6 +1271,7 @@ with tab4:
             "Highest Scoring Weeks",
             "Lowest Scoring Weeks",
             "Lowest Scoring Weekly Bags",
+            "Largest Monday Night Comebacks",
             "Biggest Blowouts",
             "Closest Games"
         ],
@@ -1281,6 +1386,13 @@ with tab4:
         else:
             st.write("No weekly bag records found.")
             
+    elif record_type == "Largest Monday Night Comebacks":
+        cb_df = get_monday_comebacks(box_df, games)
+        if not cb_df.empty:
+            render_html_table(cb_df, left_align_cols=['Winning Team Monday Players', 'Losing Team Monday Players'])
+        else:
+            st.info("No Monday night comebacks found in record history.")
+
     elif record_type == "Biggest Blowouts":
         blowouts = games[(games['W'] == 1) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].sort_values('Margin', ascending=False).head(15).copy().reset_index(drop=True)
         blowouts['Rank'] = blowouts.index + 1
@@ -1902,4 +2014,4 @@ with tab_player:
             else:
                 st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-            
+        
