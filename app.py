@@ -1048,6 +1048,11 @@ with tab4:
             return p
         start_df['Pos'] = start_df[pos_col].apply(clean_pos)
         
+        # Prevent pandas merge collisions with opponent name
+        cols_to_drop = [c for c in ['Opponent_Team_Name', 'Opponent', 'Outcome'] if c in start_df.columns]
+        if cols_to_drop:
+            start_df = start_df.drop(columns=cols_to_drop)
+        
         el_g = games[games['Game_Type'].isin([1, 2, 4]) & (games['Team_Name'].str.upper() != 'CAM')].copy()
         el_g['Season_Str'] = el_g['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         el_g['Week_Num'] = pd.to_numeric(el_g['Week'], errors='coerce').fillna(0).astype(int)
@@ -1060,19 +1065,19 @@ with tab4:
             return f"{res} ({float(r['Actual_Points']):.1f} - {float(r['Opp_Points']):.1f})"
         el_g['Outcome'] = el_g.apply(make_outcome, axis=1)
         
+        el_g_sub = el_g[['Season_Str', 'Week_Num', 'Team_Str', 'Opponent_Team_Name', 'Outcome']].drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
+        
         merged = pd.merge(
             start_df,
-            el_g[['Season_Str', 'Week_Num', 'Team_Str', 'Opponent_Team_Name', 'Outcome']],
+            el_g_sub,
             on=['Season_Str', 'Week_Num', 'Team_Str'],
             how='inner'
         )
-        merged = merged.rename(columns={
-            name_col: 'Player',
-            'Season_Str': 'Season',
-            'Week_Num': 'Week',
-            'Team_Str': 'Team',
-            'Opponent_Team_Name': 'Opponent'
-        })
+        merged['Player'] = merged[name_col]
+        merged['Season'] = merged['Season_Str']
+        merged['Week'] = merged['Week_Num']
+        merged['Team'] = merged['Team_Str']
+        merged['Opponent'] = merged['Opponent_Team_Name']
         return merged
     
     if record_type == "Highest Scoring Weeks":
@@ -1152,7 +1157,7 @@ with tab4:
             top_players['Rank'] = top_players.index + 1
             top_players['Points'] = top_players['Points_Num'].apply(lambda x: f"{float(x):.1f}")
             cols_disp = ['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']
-            render_html_table(top_players[cols_disp])
+            render_html_table(top_players[[c for c in cols_disp if c in top_players.columns]])
         else:
             st.info("No player scoring records available.")
 
@@ -1164,14 +1169,14 @@ with tab4:
             low_all['Rank'] = low_all.index + 1
             low_all['Points'] = low_all['Points_Num'].apply(lambda x: f"{float(x):.1f}")
             cols_disp = ['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']
-            render_html_table(low_all[cols_disp])
+            render_html_table(low_all[[c for c in cols_disp if c in low_all.columns]])
 
             st.write("### Negative Point Starters (Non-Defense)")
             non_dst_neg = p_perf[(~p_perf['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])) & (p_perf['Points_Num'] < 0)].sort_values('Points_Num', ascending=True).copy().reset_index(drop=True)
             if not non_dst_neg.empty:
                 non_dst_neg['Rank'] = non_dst_neg.index + 1
                 non_dst_neg['Points'] = non_dst_neg['Points_Num'].apply(lambda x: f"{float(x):.1f}")
-                render_html_table(non_dst_neg[cols_disp])
+                render_html_table(non_dst_neg[[c for c in cols_disp if c in non_dst_neg.columns]])
             else:
                 st.info("No non-defense starters have scored negative points.")
         else:
@@ -1230,13 +1235,13 @@ with tab4:
         render_html_table(bag_df[['Team'] + bag_seasons + ['Total']])
 
     elif record_type == "Weekly Last Place Score by Team":
-        reg_games = games[(games['Game_Type'] == 1) & (games['Season_Num'] >= 2017) & (games['Team_Name'].str.upper() != 'CAM')].copy()
+        reg_games = games[(games['Game_Type'] == 1) & (games['Season_Num'] >= 2017)].copy()
         if not reg_games.empty:
             min_pts = reg_games.groupby(['Season', 'Week'])['Actual_Points'].transform('min')
             reg_games['Is_Low_Scorer'] = (reg_games['Actual_Points'] == min_pts)
             
             lp_data = []
-            for t in teams_no_cam:
+            for t in teams:
                 row = {'Team': t}
                 tot = 0
                 for s in lp_seasons:
@@ -1574,4 +1579,4 @@ with tab_player:
             else:
                 st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-            
+                
