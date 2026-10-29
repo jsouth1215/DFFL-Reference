@@ -452,7 +452,6 @@ try:
         reverse=True
     )
     
-    # Exclude ongoing seasons that have not yet had any playoff games played
     completed_playoff_seasons = set(
         games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
     )
@@ -1253,6 +1252,25 @@ with tab_player:
 
         col_dyn_header = "Years" if dps_year == "All-Time" else "Weeks"
 
+        def format_ranges(nums):
+            if not nums:
+                return ""
+            clean_nums = sorted(list(set(int(x) for x in nums if pd.notnull(x))))
+            if not clean_nums:
+                return ""
+            ranges = []
+            start = clean_nums[0]
+            end = clean_nums[0]
+            for n in clean_nums[1:]:
+                if n == end + 1:
+                    end = n
+                else:
+                    ranges.append(f"{start}-{end}" if start != end else f"{start}")
+                    start = n
+                    end = n
+            ranges.append(f"{start}-{end}" if start != end else f"{start}")
+            return ", ".join(ranges)
+
         b_clean = box_df.copy()
         b_clean['Season_Str'] = b_clean['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         b_clean['Week_Num'] = pd.to_numeric(b_clean['Week'], errors='coerce').fillna(0).astype(int)
@@ -1363,16 +1381,16 @@ with tab_player:
                     time_str = ", ".join(seasons_arr)
                 else:
                     weeks_arr = sorted(list(set(int(w) for w in grp['Week_Num'].dropna().unique())))
-                    time_str = ", ".join(str(w) for w in weeks_arr)
+                    time_str = format_ranges(weeks_arr)
 
                 row_item = {
                     'Player': player,
                     'NFL Team': nfl_tm_str,
-                    col_dyn_header: time_str,
                     'Starts': starts,
                     'Points_Num': tot_pts,
                     'Points': f"{tot_pts:.1f}",
-                    'PPG': f"{ppg:.1f}"
+                    'PPG': f"{ppg:.1f}",
+                    col_dyn_header: time_str
                 }
 
                 if target_pos == 'QB':
@@ -1409,28 +1427,27 @@ with tab_player:
                 return pd.DataFrame()
 
             df_pos = pd.DataFrame(rows).sort_values(['Points_Num', 'Starts'], ascending=[False, False]).reset_index(drop=True)
-            df_pos['Rank'] = df_pos.index + 1
 
             if target_pos == 'QB':
-                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Pass Yds', 'Pass TD', 'INT', 'Rush Yds', 'Rush TD', 'Points', 'PPG']
+                col_order = ['Player', 'NFL Team', 'Starts', 'Pass Yds', 'Pass TD', 'INT', 'Rush Yds', 'Rush TD', 'Points', 'PPG', col_dyn_header]
             elif target_pos == 'RB':
-                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Rush Yds', 'Rush TD', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG']
+                col_order = ['Player', 'NFL Team', 'Starts', 'Rush Yds', 'Rush TD', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG', col_dyn_header]
             elif target_pos == 'WR':
-                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Rush Yds', 'Rush TD', 'Points', 'PPG']
+                col_order = ['Player', 'NFL Team', 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Rush Yds', 'Rush TD', 'Points', 'PPG', col_dyn_header]
             elif target_pos == 'TE':
-                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG']
+                col_order = ['Player', 'NFL Team', 'Starts', 'Rec', 'Rec Yds', 'Rec TD', 'Points', 'PPG', col_dyn_header]
             elif target_pos == 'K':
-                col_order = ['Rank', 'Player', 'NFL Team', col_dyn_header, 'Starts']
+                col_order = ['Player', 'NFL Team', 'Starts']
                 if col_fgm: col_order.append('FGM')
                 if col_xpm: col_order.append('XPM')
-                col_order.extend(['Points', 'PPG'])
+                col_order.extend(['Points', 'PPG', col_dyn_header])
             elif target_pos == 'D/ST':
-                col_order = ['Rank', 'Player', col_dyn_header, 'Starts']
+                col_order = ['Player', 'Starts']
                 if col_sacks: col_order.append('Sacks')
                 if col_def_int: col_order.append('INT')
                 if col_fum_rec: col_order.append('FR')
                 if col_def_td: col_order.append('TD')
-                col_order.extend(['Points', 'PPG'])
+                col_order.extend(['Points', 'PPG', col_dyn_header])
 
             return df_pos[[c for c in col_order if c in df_pos.columns]]
 
@@ -1452,4 +1469,4 @@ with tab_player:
             else:
                 st.info(f"No {pos_titles[p_code]} with points scored on record for {dps_team} ({dps_year}).")
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-            
+        
