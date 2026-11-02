@@ -534,6 +534,44 @@ def get_starter_performances(box_df, games):
     merged['Opponent'] = merged['Opponent_Team_Name']
     return merged
 
+def get_unique_starters_records(box_df, games, completed_only=False):
+    if box_df.empty or games.empty:
+        return pd.DataFrame(), ""
+    b_c = box_df.copy()
+    b_c['Season_Str'] = b_c['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    b_c['Week_Num'] = pd.to_numeric(b_c['Week'], errors='coerce').fillna(0).astype(int)
+    b_c['Team_Str'] = b_c['Team_Name'].astype(str).str.strip()
+    
+    slot_col = 'Slot' if 'Slot' in b_c.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_c.columns else 'Position')
+    name_col = 'Player_Name' if 'Player_Name' in b_c.columns else 'Player'
+    pos_col = 'Position' if 'Position' in b_c.columns else ('Pos' if 'Pos' in b_c.columns else slot_col)
+    
+    def clean_pos(val):
+        p = str(val).strip().upper()
+        if p == 'QB': return 'QB'
+        if p == 'RB': return 'RB'
+        if p == 'WR': return 'WR'
+        if p == 'TE': return 'TE'
+        if p in ['K', 'PK']: return 'K'
+        if p in ['D/ST', 'DST', 'DEF', 'DP']: return 'D/ST'
+        return p
+    b_c['Clean_Pos'] = b_c[pos_col].apply(clean_pos)
+    
+    is_start = ~b_c[slot_col].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+    start_df = b_c[is_start].copy()
+    
+    reg_g = games[games['Game_Type'] == 1].copy()
+    reg_g['Season_Str'] = reg_g['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    reg_g['Week_Num'] = pd.to_numeric(reg_g['Week'], errors='coerce').fillna(0).astype(int)
+    reg_g['Team_Str'] = reg_g['Team_Name'].astype(str).str.strip()
+    
+    if completed_only:
+        reg_g = reg_g[reg_g['Season_Str'].isin(completed_playoff_seasons)]
+        
+    valid_matchups = reg_g[['Season_Str', 'Week_Num', 'Team_Str']].drop_duplicates()
+    merged = pd.merge(start_df, valid_matchups, on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
+    return merged, name_col
+
 def get_all_streaks_records(games):
     streak_games = games[games['Game_Type'].isin([1, 2])].copy()
     streak_games['Season_Str'] = streak_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -1322,6 +1360,8 @@ with tab4:
             "Highest Scoring Players",
             "Lowest Scoring Players",
             "Highest Scoring Stacks",
+            "Most Unique Players Started",
+            "Least Unique Players Started",
             "Most Fantasy Teams Started For",
             "Started on Same Fantasy Team for 3+ NFL Teams"
         ],
@@ -1583,6 +1623,38 @@ with tab4:
         else:
             st.info("No player scoring records available.")
 
+    elif record_type in ["Most Unique Players Started", "Least Unique Players Started"]:
+        is_least = (record_type == "Least Unique Players Started")
+        st_data, name_col = get_unique_starters_records(box_df, games, completed_only=is_least)
+        if not st_data.empty:
+            pos_filter = st.radio("Position Filter:", ["All Positions", "QB", "RB", "WR", "TE", "K", "D/ST"], horizontal=True, key=f"pos_{record_type}")
+            if pos_filter != "All Positions":
+                sub_starters = st_data[st_data['Clean_Pos'] == pos_filter]
+            else:
+                sub_starters = st_data
+                
+            unique_rows = []
+            for (s, tm), grp in sub_starters.groupby(['Season_Str', 'Team_Str']):
+                p_list = sorted(list(set(str(p).strip() for p in grp[name_col].dropna().unique() if str(p).strip())))
+                unique_rows.append({
+                    'Season': s,
+                    'Team': tm,
+                    'Players Started': len(p_list),
+                    'Regular Season Finish': rs_finish_map.get((s, tm), ""),
+                    'Playoff Outcome': po_outcome_map.get((s, tm), ""),
+                    'Player List': ", ".join(p_list)
+                })
+            if unique_rows:
+                res_u_df = pd.DataFrame(unique_rows)
+                res_u_df = res_u_df.sort_values(['Players Started', 'Season'], ascending=[is_least, False]).head(15).reset_index(drop=True)
+                res_u_df['Rank'] = res_u_df.index + 1
+                disp_u_cols = ['Rank', 'Season', 'Team', 'Players Started', 'Regular Season Finish', 'Playoff Outcome', 'Player List']
+                render_html_table(res_u_df[disp_u_cols], left_align_cols=['Player List'])
+            else:
+                st.info("No starter data found for this selection.")
+        else:
+            st.info("No player records available.")
+
     elif record_type == "Most Fantasy Teams Started For":
         p_perf = get_starter_performances(box_df, games)
         if not p_perf.empty:
@@ -1647,7 +1719,7 @@ with tab4:
     elif record_type == "Least Points Per Game in a Season":
         if not season_team_agg_all.empty:
             sub_least = season_team_agg_all[season_team_agg_all['Season'] != '2017'].copy()
-            low_ppg = sub_least.sort_values('PPG_Num', ascending=True).head(15).copy().reset_index(drop=True)
+            low_ppg = sub_least.sort_values('PPG_Num', ascending=True).head(20).copy().reset_index(drop=True)
             low_ppg['Rank'] = low_ppg.index + 1
             low_ppg['PF'] = low_ppg['PF_Formatted']
             low_ppg['Season_Display'] = low_ppg['Season'].apply(lambda s: f"{s}*" if str(s) == '2026' else str(s))
