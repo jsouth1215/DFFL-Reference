@@ -28,7 +28,8 @@ seasons_list = sorted(
 completed_playoff_seasons = set(
     games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
 )
-rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams)
+# Passing games enables automatic fallback calculation of regular season standings
+rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
 
 # 2. Sequential Tab Declarations
 tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
