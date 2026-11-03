@@ -79,7 +79,7 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, teams_n
     bag_szns = sorted([str(s).replace('.0','').strip() for s in games['Season'].unique() if str(s).replace('.0','').strip().isdigit() and int(str(s).replace('.0','').strip()) >= 2019], key=lambda x: int(x))
     lp_szns = sorted([str(s).replace('.0','').strip() for s in games['Season'].unique() if str(s).replace('.0','').strip().isdigit() and int(str(s).replace('.0','').strip()) >= 2017], key=lambda x: int(x))
 
-    rs_map = {(str(r['Season']).replace('.0','').strip(), str(r['Team_Name']).strip()): format_ordinal(r['RS_Rank']) for _, r in rs_ranks_df.iterrows()} if not rs_ranks_df.empty else {}
+    rs_map = {(str(r['Season']).replace('.0','').strip(), str(r['Team_Name']).strip()): format_ordinal(r['RS_Rank']) for _, r in rs_ranks_df.iterrows()} if not rs_ranks_df.empty and 'Team_Name' in rs_ranks_df.columns else {}
     po_all = games[games['Game_Type'] == 2]
     po_map = {(str(s).replace('.0','').strip(), str(t).strip()): get_playoff_outcome(grp) for (s, t), grp in po_all.groupby(['Season', 'Team_Name'])} if not po_all.empty else {}
 
@@ -114,7 +114,7 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, teams_n
     s_comp = s_agg[s_agg['Season'].isin(completed_playoff_seasons)].copy() if not s_agg.empty else pd.DataFrame()
 
     if rec_type == "Highest Scoring Weeks":
-        df = games[games['Game_Type'].isin([1, 2, 4])][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].copy()
+        df = games[games['Game_Type'].isin([1, 2, 4])].copy()
         df['Points_Num'] = pd.to_numeric(df['Actual_Points'], errors='coerce')
         df = df.sort_values(['Points_Num', 'Season_Num', 'Week_Num'], ascending=[False, False, False]).head(15).reset_index(drop=True)
         df = apply_competition_rank(df, 'Points_Num', round_digits=1)
@@ -122,7 +122,7 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, teams_n
         render_html_table(df[['Rank', 'Season', 'Week', 'Team_Name', 'Points', 'Opponent_Team_Name']].rename(columns={'Team_Name': 'Team', 'Opponent_Team_Name': 'Opponent'}))
 
     elif rec_type == "Lowest Scoring Weeks":
-        df = games[(games['Actual_Points'] > 0) & (games['Game_Type'].isin([1, 2]))][['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name']].copy()
+        df = games[(games['Actual_Points'] > 0) & (games['Game_Type'].isin([1, 2]))].copy()
         df['Points_Num'] = pd.to_numeric(df['Actual_Points'], errors='coerce')
         df = df.sort_values(['Points_Num', 'Season_Num', 'Week_Num'], ascending=[True, False, False]).head(15).reset_index(drop=True)
         df = apply_competition_rank(df, 'Points_Num', round_digits=1)
@@ -169,6 +169,26 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, teams_n
             render_html_table(df[['Rank', 'Season', 'Week', 'Team_Name', 'Winner Pts', 'Opponent_Team_Name', 'Loser Pts', 'Margin_Disp']].rename(columns={'Team_Name': 'Winner', 'Opponent_Team_Name': 'Loser', 'Margin_Disp': 'Margin'}))
         else:
             st.info("No games decided by 1.00 point or less.")
+
+    elif rec_type == "Top 2 Matchups":
+        if 'Top_2_Game' in games.columns:
+            top2_mask = games['Top_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
+            top2 = games[top2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
+            top2['Season'] = top2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            top2['Actual_Points'] = top2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+            top2['Opp_Points'] = top2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+            top2['Margin'] = top2['Margin'].apply(lambda x: f"{float(x):.1f}")
+            render_html_table(top2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}))
+
+    elif rec_type == "Bottom 2 Matchups":
+        if 'Bottom_2_Game' in games.columns:
+            bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
+            bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
+            bot2['Season'] = bot2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            bot2['Actual_Points'] = bot2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
+            bot2['Opp_Points'] = bot2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+            bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
+            render_html_table(bot2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}))
 
     elif rec_type == "Highest Scoring Players":
         p = get_starter_performances(box_df, games)
@@ -365,13 +385,14 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, teams_n
         po_rows = []
         for t in teams_no_cam:
             apps, byes = 0, 0
-            for _, r in rs_ranks_df[rs_ranks_df['Team_Name'] == t].iterrows():
-                szn = str(r['Season']).strip()
-                if szn.isdigit() and szn in completed_playoff_seasons:
-                    s_int, rk = int(szn), float(r['RS_Rank'])
-                    if pd.notnull(rk):
-                        if (s_int == 2017 and rk <= 4) or (s_int > 2017 and rk <= 6): apps += 1
-                        if s_int >= 2018 and rk <= 2: byes += 1
+            if not rs_ranks_df.empty and 'Team_Name' in rs_ranks_df.columns:
+                for _, r in rs_ranks_df[rs_ranks_df['Team_Name'] == t].iterrows():
+                    szn = str(r['Season']).strip()
+                    if szn.isdigit() and szn in completed_playoff_seasons:
+                        s_int, rk = int(szn), float(r['RS_Rank'])
+                        if pd.notnull(rk):
+                            if (s_int == 2017 and rk <= 4) or (s_int > 2017 and rk <= 6): apps += 1
+                            if s_int >= 2018 and rk <= 2: byes += 1
             pg = games[(games['Team_Name'] == t) & (games['Game_Type'] == 2)]
             r_str = pg['Playoff_Round'].astype(str).str.strip().str.lower()
             qf, sf, f = pg[r_str.str.contains('quarter')], pg[r_str.str.contains('semi')], pg[r_str.str.contains('final|champ') & ~r_str.str.contains('quarter|semi')]
