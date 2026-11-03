@@ -21,7 +21,11 @@ def load_nfl_monday_teams():
             except:
                 pass
         mon_games = sched[mon_mask]
-        alias_map = {'WSH': 'WAS', 'WAS': 'WSH', 'JAX': 'JAC', 'JAC': 'JAX', 'OAK': 'LV', 'LV': 'OAK', 'LA': 'LAR', 'LAR': 'LA', 'SD': 'LAC', 'LAC': 'SD'}
+        alias_map = {
+            'WSH': 'WAS', 'WAS': 'WSH', 'JAX': 'JAC', 'JAC': 'JAX',
+            'OAK': 'LV', 'LV': 'OAK', 'LA': 'LAR', 'LAR': 'LA',
+            'SD': 'LAC', 'LAC': 'SD'
+        }
         for _, r in mon_games.iterrows():
             s, w = str(r['season']).strip(), int(r['week'])
             for tm_col in ['away_team', 'home_team']:
@@ -51,12 +55,16 @@ def get_game_top_scorers(box_df):
     return dict(zip(zip(top['Season_Str'], top['Week_Num'], top['Team_Str']), top['Player_Label']))
 
 @st.cache_data(ttl=600)
-def load_rs_rankings(file_path, teams_list):
+def load_rs_rankings(file_path, teams_list, games=None):
     try:
         df = pd.read_excel(file_path, sheet_name="All Time W-L", engine="pyxlsb", header=None)
         year_row_idx, team_col_idx = None, None
         for i, row in df.iterrows():
-            if sum(1 for x in row if str(x).replace('.0','').strip().isdigit() and 2010 < int(str(x).replace('.0','').strip()) < 2030) >= 3:
+            years_count = sum(
+                1 for x in row 
+                if str(x).replace('.0','').strip().isdigit() and 2010 < int(str(x).replace('.0','').strip()) < 2030
+            )
+            if years_count >= 3:
                 year_row_idx = i
                 break
         for j in df.columns:
@@ -64,19 +72,38 @@ def load_rs_rankings(file_path, teams_list):
                 team_col_idx = j
                 break
         if year_row_idx is not None and team_col_idx is not None:
-            headers = df.iloc[year_row_idx]
+            headers = [str(x).replace('.0','').strip() for x in df.iloc[year_row_idx]]
             data = df.iloc[year_row_idx+1:].copy()
             data.columns = headers
-            data = data.rename(columns={headers[team_col_idx]: 'Team_Name'})
-            year_cols = [c for c in data.columns if str(c).replace('.0','').strip().isdigit() and 2010 < int(str(c).replace('.0','').strip()) < 2030]
-            ranks = data[['Team_Name'] + year_cols].melt(id_vars='Team_Name', var_name='Season', value_name='RS_Rank')
-            ranks['Season'] = ranks['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            ranks['RS_Rank'] = pd.to_numeric(ranks['RS_Rank'], errors='coerce')
-            ranks['Team_Name'] = ranks['Team_Name'].astype(str).str.strip()
-            return ranks.dropna(subset=['RS_Rank'])
-    except:
+            team_header = headers[team_col_idx]
+            data = data.rename(columns={team_header: 'Team_Name'})
+            year_cols = [c for c in data.columns if c.isdigit() and 2010 < int(c) < 2030]
+            if year_cols:
+                ranks = data[['Team_Name'] + year_cols].melt(id_vars='Team_Name', var_name='Season', value_name='RS_Rank')
+                ranks['Season'] = ranks['Season'].astype(str).str.strip()
+                ranks['RS_Rank'] = pd.to_numeric(ranks['RS_Rank'], errors='coerce')
+                ranks['Team_Name'] = ranks['Team_Name'].astype(str).str.strip()
+                ranks = ranks.dropna(subset=['RS_Rank'])
+                if not ranks.empty:
+                    return ranks
+    except Exception:
         pass
-    return pd.DataFrame()
+
+    # Built-in Fallback: compute directly from regular season games
+    if games is not None and not games.empty:
+        reg = games[games['Game_Type'] == 1].copy()
+        if not reg.empty:
+            szn_st = reg.groupby(['Season', 'Team_Name']).agg(
+                W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')
+            ).reset_index()
+            szn_st['Win %'] = (szn_st['W'] / (szn_st['W'] + szn_st['L'] + szn_st['T'])).fillna(0)
+            szn_st = szn_st.sort_values(['Season', 'Win %', 'PF'], ascending=[False, False, False])
+            szn_st['RS_Rank'] = szn_st.groupby('Season').cumcount() + 1
+            res = szn_st[['Season', 'Team_Name', 'RS_Rank']].copy()
+            res['Season'] = res['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            return res
+
+    return pd.DataFrame(columns=['Team_Name', 'Season', 'RS_Rank'])
 
 @st.cache_data(ttl=600)
 def load_data():
@@ -283,4 +310,4 @@ def get_monday_comebacks(box_df, games):
         res['Rank'] = res.index + 1
         return res[['Rank', 'Deficit Overcome', 'Final Score', 'Winner', 'Loser', 'Season', 'Week', 'Winning Team Monday Players', 'Losing Team Monday Players']]
     return pd.DataFrame()
-  
+    
