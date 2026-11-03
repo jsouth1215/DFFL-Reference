@@ -42,7 +42,11 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, seasons
     
     longest_w, w_span, longest_l, l_span = get_detailed_streaks(comp_games)
     
-    rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team]
+    if not rs_ranks_df.empty and 'Team_Name' in rs_ranks_df.columns:
+        rs_team = rs_ranks_df[rs_ranks_df['Team_Name'] == selected_team].copy()
+    else:
+        rs_team = pd.DataFrame(columns=['Team_Name', 'Season', 'RS_Rank'])
+
     playoff_apps, playoff_byes = 0, 0
     for _, row in rs_team.iterrows():
         szn = str(row['Season']).strip()
@@ -142,10 +146,13 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, seasons
     szn_stats['Expected Wins'] = szn_stats['Exp_Win_Total'].fillna(0).apply(lambda x: f"{x:.1f}")
     szn_stats['Luck Factor'] = szn_stats.apply(lambda r: "0.0" if pd.isna(r['Exp_Win_Total']) or abs(r['W']-r['Exp_Win_Total'])<0.05 else f"{r['W']-r['Exp_Win_Total']:+.1f}", axis=1)
     
-    rs_format = rs_team[['Season', 'RS_Rank']].copy()
-    rs_format['Season'] = rs_format['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-    szn_stats = pd.merge(szn_stats, rs_format, on='Season', how='left')
-    szn_stats['Standings Finish'] = szn_stats['RS_Rank'].apply(lambda x: f"{int(x)}{'th' if 11 <= int(x)%100 <= 13 else {1:'st',2:'nd',3:'rd'}.get(int(x)%10, 'th')}" if pd.notnull(x) else "")
+    if not rs_team.empty and 'RS_Rank' in rs_team.columns:
+        rs_format = rs_team[['Season', 'RS_Rank']].copy()
+        rs_format['Season'] = rs_format['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        szn_stats = pd.merge(szn_stats, rs_format, on='Season', how='left')
+        szn_stats['Standings Finish'] = szn_stats['RS_Rank'].apply(lambda x: f"{int(x)}{'th' if 11 <= int(x)%100 <= 13 else {1:'st',2:'nd',3:'rd'}.get(int(x)%10, 'th')}" if pd.notnull(x) else "")
+    else:
+        szn_stats['Standings Finish'] = ""
     
     for p in ['QB', 'RB', 'WR', 'TE']:
         szn_stats[f'Top {p}'] = szn_stats['Season'].map(top_per_szn[p]).fillna("")
@@ -183,3 +190,4 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, seasons
         opp_list.append({'Opponent': opp, 'GP': tot_g, 'W': w_cnt, 'L': l_cnt, 'T': t_cnt, 'Win_Pct_Raw': wp, 'Win %': f"{wp:.3f}".replace("0.", ".", 1) if wp < 1 else f"{wp:.3f}", 'PF': int(round(og['Actual_Points'].sum())), 'PA': int(round(og['Opp_Points'].sum())), 'Playoff Record': po_rec})
     if opp_list:
         render_html_table(pd.DataFrame(opp_list).sort_values(['Win_Pct_Raw', 'W', 'GP'], ascending=[False, False, False])[['Opponent', 'GP', 'W', 'L', 'Win %', 'PF', 'PA', 'Playoff Record']])
+        
