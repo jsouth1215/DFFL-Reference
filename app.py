@@ -56,4 +56,4 @@ with tab4:
 
 with tab_player:
     player_scoring.render(games, box_df, teams, seasons_list)
-
+    
