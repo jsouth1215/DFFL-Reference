@@ -176,7 +176,7 @@ def get_starter_performances(box_df, games):
         return p if p in ['QB', 'RB', 'WR', 'TE'] else p
     starters['Pos'] = starters[pos_col].apply(clean_p)
     
-    # Drop colliding columns from box score starters prior to merge
+    # Pre-emptively drop colliding columns from starters before joining with matchup data
     cols_to_drop = [c for c in ['Opponent_Team_Name', 'Opponent', 'Outcome'] if c in starters.columns]
     if cols_to_drop:
         starters = starters.drop(columns=cols_to_drop)
@@ -193,7 +193,7 @@ def get_starter_performances(box_df, games):
     el_g_sub = el_g[['Season_Str', 'Week_Num', 'Team_Str', 'Opponent_Team_Name', 'Outcome']].drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
     merged = pd.merge(starters, el_g_sub, on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
     
-    # Defensive column lookup
+    # Safely select Opponent and Outcome regardless of pandas renaming
     opp_col = next((c for c in ['Opponent_Team_Name', 'Opponent_Team_Name_y', 'Opponent_Team_Name_x', 'Opponent'] if c in merged.columns), None)
     out_col = next((c for c in ['Outcome', 'Outcome_y', 'Outcome_x'] if c in merged.columns), None)
 
