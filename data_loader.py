@@ -89,7 +89,6 @@ def load_rs_rankings(file_path, teams_list, games=None):
     except Exception:
         pass
 
-    # Built-in Fallback: compute directly from regular season games
     if games is not None and not games.empty:
         reg = games[games['Game_Type'] == 1].copy()
         if not reg.empty:
@@ -177,18 +176,33 @@ def get_starter_performances(box_df, games):
         return p if p in ['QB', 'RB', 'WR', 'TE'] else p
     starters['Pos'] = starters[pos_col].apply(clean_p)
     
+    # Drop colliding columns from box score starters prior to merge
+    cols_to_drop = [c for c in ['Opponent_Team_Name', 'Opponent', 'Outcome'] if c in starters.columns]
+    if cols_to_drop:
+        starters = starters.drop(columns=cols_to_drop)
+
     el_g = games[games['Game_Type'].isin([1, 2, 4]) & (games['Team_Name'].str.upper() != 'CAM')].copy()
     el_g['Season_Str'] = el_g['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     el_g['Week_Num'] = pd.to_numeric(el_g['Week'], errors='coerce').fillna(0).astype(int)
     el_g['Team_Str'] = el_g['Team_Name'].astype(str).str.strip()
-    el_g['Outcome'] = el_g.apply(lambda r: f"BYE ({float(r['Actual_Points']):.1f})" if r['Game_Type'] == 4 else f"{'W' if r['W']==1 else ('L' if r['L']==1 else 'T')} ({float(r['Actual_Points']):.1f} - {float(r['Opp_Points']):.1f})", axis=1)
+    el_g['Outcome'] = el_g.apply(
+        lambda r: f"BYE ({float(r['Actual_Points']):.1f})" if r['Game_Type'] == 4 else f"{'W' if r['W']==1 else ('L' if r['L']==1 else 'T')} ({float(r['Actual_Points']):.1f} - {float(r['Opp_Points']):.1f})", 
+        axis=1
+    )
     
-    merged = pd.merge(starters, el_g[['Season_Str', 'Week_Num', 'Team_Str', 'Opponent_Team_Name', 'Outcome']].drop_duplicates(), on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
+    el_g_sub = el_g[['Season_Str', 'Week_Num', 'Team_Str', 'Opponent_Team_Name', 'Outcome']].drop_duplicates(subset=['Season_Str', 'Week_Num', 'Team_Str'])
+    merged = pd.merge(starters, el_g_sub, on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
+    
+    # Defensive column lookup
+    opp_col = next((c for c in ['Opponent_Team_Name', 'Opponent_Team_Name_y', 'Opponent_Team_Name_x', 'Opponent'] if c in merged.columns), None)
+    out_col = next((c for c in ['Outcome', 'Outcome_y', 'Outcome_x'] if c in merged.columns), None)
+
     merged['Player'] = merged[name_col]
     merged['Season'] = merged['Season_Str']
     merged['Week'] = merged['Week_Num']
     merged['Team'] = merged['Team_Str']
-    merged['Opponent'] = merged['Opponent_Team_Name']
+    merged['Opponent'] = merged[opp_col] if opp_col else ""
+    merged['Outcome'] = merged[out_col] if out_col else ""
     return merged
 
 def get_unique_starters_records(box_df, games, completed_only=False, completed_playoff_seasons=None):
