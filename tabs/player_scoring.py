@@ -2,6 +2,52 @@ import streamlit as st
 import pandas as pd
 from utils import render_html_table, format_ranges
 
+NFL_32_DEFENSES = [
+    ("Arizona Cardinals", ["CARDINALS"], ["ARI"]),
+    ("Atlanta Falcons", ["FALCONS"], ["ATL"]),
+    ("Baltimore Ravens", ["RAVENS"], ["BAL"]),
+    ("Buffalo Bills", ["BILLS"], ["BUF"]),
+    ("Carolina Panthers", ["PANTHERS"], ["CAR"]),
+    ("Chicago Bears", ["BEARS"], ["CHI"]),
+    ("Cincinnati Bengals", ["BENGALS"], ["CIN"]),
+    ("Cleveland Browns", ["BROWNS"], ["CLE"]),
+    ("Dallas Cowboys", ["COWBOYS"], ["DAL"]),
+    ("Denver Broncos", ["BRONCOS"], ["DEN"]),
+    ("Detroit Lions", ["LIONS"], ["DET"]),
+    ("Green Bay Packers", ["PACKERS"], ["GB"]),
+    ("Houston Texans", ["TEXANS"], ["HOU"]),
+    ("Indianapolis Colts", ["COLTS"], ["IND"]),
+    ("Jacksonville Jaguars", ["JAGUARS"], ["JAX", "JAC"]),
+    ("Kansas City Chiefs", ["CHIEFS"], ["KC"]),
+    ("Las Vegas Raiders", ["RAIDERS"], ["LV", "OAK"]),
+    ("Los Angeles Chargers", ["CHARGERS"], ["LAC", "SD"]),
+    ("Los Angeles Rams", ["RAMS"], ["LAR", "LA", "STL"]),
+    ("Miami Dolphins", ["DOLPHINS"], ["MIA"]),
+    ("Minnesota Vikings", ["VIKINGS"], ["MIN"]),
+    ("New England Patriots", ["PATRIOTS"], ["NE"]),
+    ("New Orleans Saints", ["SAINTS"], ["NO"]),
+    ("New York Giants", ["GIANTS", "NYG"], ["NYG"]),
+    ("New York Jets", ["JETS", "NYJ"], ["NYJ"]),
+    ("Philadelphia Eagles", ["EAGLES"], ["PHI"]),
+    ("Pittsburgh Steelers", ["STEELERS"], ["PIT"]),
+    ("San Francisco 49ers", ["49ERS"], ["SF"]),
+    ("Seattle Seahawks", ["SEAHAWKS"], ["SEA"]),
+    ("Tampa Bay Buccaneers", ["BUCCANEERS", "BUCS"], ["TB"]),
+    ("Tennessee Titans", ["TITANS"], ["TEN"]),
+    ("Washington Commanders", ["COMMANDERS", "REDSKINS", "FOOTBALL TEAM"], ["WAS", "WSH"]),
+]
+
+def get_unstarted_defenses(dst_df, name_col):
+    started = set()
+    if not dst_df.empty:
+        for _, r in dst_df.iterrows():
+            p_name = str(r[name_col]).upper()
+            nfl_t = str(r.get('NFL_Team_Clean', '')).upper().strip()
+            for full_name, nicks, abbrs in NFL_32_DEFENSES:
+                if (nfl_t and nfl_t in abbrs) or any(nick in p_name for nick in nicks):
+                    started.add(full_name)
+    return [team[0] for team in NFL_32_DEFENSES if team[0] not in started]
+
 def render(games, box_df, teams, seasons_list):
     if box_df.empty:
         st.warning("Player data not found.")
@@ -31,7 +77,8 @@ def render(games, box_df, teams, seasons_list):
 
     starters = b_clean[(b_clean['Team_Str'] == d_team) & (~b_clean[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH']))]
     counted = pd.merge(starters, el_g[['Season_Str', 'Week_Num', 'Team_Str']], on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
-    if d_year != "All-Time": counted = counted[counted['Season_Str'] == str(d_year)]
+    if d_year != "All-Time": 
+        counted = counted[counted['Season_Str'] == str(d_year)]
 
     def clean_p(v):
         p = str(v).strip().upper()
@@ -92,14 +139,48 @@ def render(games, box_df, teams, seasons_list):
         if not rows: return pd.DataFrame()
         df = pd.DataFrame(rows).sort_values(['Points_Num', 'Starts'], ascending=[False, False]).reset_index(drop=True)
         base = ['Player', 'NFL Team', 'Starts'] if p_target != 'D/ST' else ['Player', 'Starts']
-        stats_cols = {'QB': ['Pass Yds', 'Pass TD', 'INT', 'Rush Yds', 'Rush TD'], 'RB': ['Rush Yds', 'Rush TD', 'Rec', 'Rec Yds', 'Rec TD'], 'WR': ['Rec', 'Rec Yds', 'Rec TD', 'Rush Yds', 'Rush TD'], 'TE': ['Rec', 'Rec Yds', 'Rec TD'], 'K': [c for c in ['FGM', 'XPM'] if c in df.columns], 'D/ST': [c for c in ['Sacks', 'INT', 'FR', 'TD'] if c in df.columns]}.get(p_target, [])
+        stats_cols = {
+            'QB': ['Pass Yds', 'Pass TD', 'INT', 'Rush Yds', 'Rush TD'],
+            'RB': ['Rush Yds', 'Rush TD', 'Rec', 'Rec Yds', 'Rec TD'],
+            'WR': ['Rec', 'Rec Yds', 'Rec TD', 'Rush Yds', 'Rush TD'],
+            'TE': ['Rec', 'Rec Yds', 'Rec TD'],
+            'K': [c for c in ['FGM', 'XPM'] if c in df.columns],
+            'D/ST': [c for c in ['Sacks', 'INT', 'FR', 'TD'] if c in df.columns]
+        }.get(p_target, [])
         return df[[c for c in base + stats_cols + ['Points', 'PPG', col_dyn] if c in df.columns]]
 
     pos_list = ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST'] if d_pos == "All Positions" else [d_pos]
-    titles = {'QB': 'Quarterbacks (QB)', 'RB': 'Running Backs (RB)', 'WR': 'Wide Receivers (WR)', 'TE': 'Tight Ends (TE)', 'K': 'Kickers (K)', 'D/ST': 'Defense / Special Teams (D/ST)'}
+    titles = {
+        'QB': 'Quarterbacks (QB)',
+        'RB': 'Running Backs (RB)',
+        'WR': 'Wide Receivers (WR)',
+        'TE': 'Tight Ends (TE)',
+        'K': 'Kickers (K)',
+        'D/ST': 'Defense / Special Teams (D/ST)'
+    }
+
     for p_code in pos_list:
         st.write(f"### {titles[p_code]}")
         tbl = build_table(p_code)
-        if not tbl.empty: render_html_table(tbl)
-        else: st.info(f"No {titles[p_code]} on record.")
+        if not tbl.empty: 
+            render_html_table(tbl)
+        else: 
+            st.info(f"No {titles[p_code]} on record.")
+
+        # Show unstarted defenses specifically for D/ST on All-Time view
+        if p_code == 'D/ST' and d_year == "All-Time":
+            dst_counted = counted[counted['Clean_Pos'] == 'D/ST']
+            unstarted = get_unstarted_defenses(dst_counted, name_c)
+            if unstarted:
+                st.markdown(
+                    f"<div style='margin-top: 10px; font-size: 14px;'><b>Defenses Never Started ({len(unstarted)}):</b> {', '.join(unstarted)}</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    "<div style='margin-top: 10px; font-size: 14px;'><b>Defenses Never Started:</b> None (All 32 NFL team defenses have been started)</div>",
+                    unsafe_allow_html=True
+                )
+
         st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+        
