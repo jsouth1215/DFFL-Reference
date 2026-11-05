@@ -33,9 +33,12 @@ def format_ordinal(val):
         return str(val)
 
 def format_ranges(nums):
-    if not nums:
+    if nums is None:
         return ""
-    clean_nums = sorted(list(set(int(x) for x in nums if pd.notnull(x))))
+    try:
+        clean_nums = sorted(list(set(int(x) for x in nums if pd.notnull(x))))
+    except Exception:
+        return ""
     if not clean_nums:
         return ""
     ranges = []
