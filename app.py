@@ -1383,28 +1383,42 @@ with tab_player:
         counted['Clean_Pos'] = counted[pos_c].apply(clean_p)
         counted[pts_c] = pd.to_numeric(counted[pts_c], errors='coerce').fillna(0)
 
-        def find_c(cands):
+        # Robust normalizer that handles spaces, underscores, and keyword fallbacks
+        def find_c(cands, fallback_kws=None, fallback_exclude=None):
             for cand in cands:
-                cn = cand.lower().replace('_', '')
+                cn = str(cand).lower().replace('_', '').replace(' ', '').replace('/', '').replace('-', '').strip()
                 for c in counted.columns:
-                    if str(c).lower().replace('_', '') == cn: return c
+                    c_norm = str(c).lower().replace('_', '').replace(' ', '').replace('/', '').replace('-', '').strip()
+                    if c_norm == cn:
+                        return c
+            if fallback_kws:
+                for c in counted.columns:
+                    c_str = str(c).lower().replace(' ', '_')
+                    if all(kw in c_str for kw in fallback_kws):
+                        if fallback_exclude and any(ex in c_str for ex in fallback_exclude):
+                            continue
+                        return c
             return None
 
-        c_pyd = find_c(['Passing_Yards', 'Pass_Yds'])
-        c_ptd = find_c(['Passing_TDs', 'Pass_TD', 'Passing_Touchdowns'])
-        c_int = find_c(['Passing_Interceptions', 'Passing_Int', 'INT'])
-        c_ryd = find_c(['Rushing_Yards', 'Rush_Yds'])
-        c_rtd = find_c(['Rushing_TDs', 'Rush_TD', 'Rushing_Touchdowns'])
-        c_rec = find_c(['Receptions', 'Rec'])
-        c_eyd = find_c(['Receiving_Yards', 'Rec_Yds'])
-        c_etd = find_c(['Receiving_TDs', 'Rec_TD', 'Receiving_Touchdowns'])
+        c_pyd = find_c(['Passing_Yards', 'Pass_Yds', 'Pass_Yards', 'Passing_Yds', 'Passing Yards', 'Pass Yds'], fallback_kws=['pass', 'yd'])
+        c_ptd = find_c(['Passing_TDs', 'Pass_TD', 'Pass_TDs', 'Passing_Touchdowns', 'Passing TDs', 'Pass TD'], fallback_kws=['pass', 'td'], fallback_exclude=['rush', 'rec', 'def'])
+        c_int = find_c(['Passing_Interceptions', 'Passing_Int', 'Pass_Int', 'Interceptions', 'INT', 'Pass INT'], fallback_kws=['int'], fallback_exclude=['def'])
+        c_ryd = find_c(['Rushing_Yards', 'Rush_Yds', 'Rush_Yards', 'Rushing_Yds', 'Rushing Yards', 'Rush Yds'], fallback_kws=['rush', 'yd'])
+        c_rtd = find_c(['Rushing_TDs', 'Rush_TD', 'Rush_TDs', 'Rushing_Touchdowns', 'Rushing TDs', 'Rush TD'], fallback_kws=['rush', 'td'], fallback_exclude=['pass', 'rec', 'def'])
+        c_rec = find_c(['Receptions', 'Rec', 'Catches'], fallback_kws=['rec'], fallback_exclude=['yard', 'td', 'pass', 'rush', 'def', 'fum', 'int'])
+        c_eyd = find_c(['Receiving_Yards', 'Rec_Yds', 'Rec_Yards', 'Receiving_Yds', 'Receiving Yards', 'Rec Yds'], fallback_kws=['rec', 'yd'], fallback_exclude=['pass', 'rush'])
+        c_etd = find_c(['Receiving_TDs', 'Rec_TD', 'Rec_TDs', 'Receiving_Touchdowns', 'Receiving TDs', 'Rec TD'], fallback_kws=['rec', 'td'], fallback_exclude=['pass', 'rush', 'def', 'int', 'fum'])
         c_sck = find_c(['Sacks', 'Sack'])
-        c_dint = find_c(['Defensive_Interceptions', 'Def_INT'])
-        c_fr = find_c(['Fumbles_Recovered', 'FR'])
-        c_dtd = find_c(['Defensive_TDs', 'Def_TD'])
-        c_fgm = find_c(['Field_Goals_Made', 'FGM'])
-        c_xpm = find_c(['Extra_Points_Made', 'XPM'])
-        def s_sum(grp, col): return int(round(pd.to_numeric(grp[col], errors='coerce').fillna(0).sum())) if col and col in grp.columns else 0
+        c_dint = find_c(['Defensive_Interceptions', 'Def_INT', 'Defensive_Int'], fallback_kws=['def', 'int'])
+        c_fr = find_c(['Fumbles_Recovered', 'FR', 'Fum_Rec'], fallback_kws=['fum', 'rec'])
+        c_dtd = find_c(['Defensive_TDs', 'Def_TD', 'Def_TDs'], fallback_kws=['def', 'td'])
+        c_fgm = find_c(['Field_Goals_Made', 'FGM', 'FG_Made'], fallback_kws=['fg', 'made'])
+        c_xpm = find_c(['Extra_Points_Made', 'XPM', 'XP_Made'], fallback_kws=['xp', 'made'])
+        
+        def s_sum(grp, col): 
+            if col and col in grp.columns:
+                return int(round(pd.to_numeric(grp[col], errors='coerce').fillna(0).sum()))
+            return 0
 
         def build_table(p_target):
             sub = counted[counted['Clean_Pos'] == p_target]
@@ -1477,3 +1491,4 @@ with tab_player:
                     )
 
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+            
