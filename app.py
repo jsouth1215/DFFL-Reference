@@ -1,14 +1,6 @@
 import streamlit as st
 from data_loader import load_data, load_box_scores, load_rs_rankings, get_game_top_scorers
-from tabs import (
-    franchise,
-    schedule,
-    box_scores,
-    matchups,
-    standings,
-    records,
-    player_scoring,
-)
+from tabs import franchise, schedule, box_scores, matchups, standings, records, player_scoring
 
 st.set_page_config(page_title="DFFL Hub", page_icon="🏈", layout="wide")
 st.title("🏈 DFFL History Hub")
@@ -28,7 +20,6 @@ seasons_list = sorted(
 completed_playoff_seasons = set(
     games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
 )
-# Passing games enables automatic fallback calculation of regular season standings
 rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
 
 # 2. Sequential Tab Declarations
