@@ -29,7 +29,7 @@ def format_ordinal(val):
         n = int(float(val))
         suffix = 'th' if 11 <= (n % 100) <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
         return f"{n}{suffix}"
-    except:
+    except Exception:
         return str(val)
 
 def format_ranges(nums):
@@ -51,6 +51,45 @@ def format_ranges(nums):
             end = n
     ranges.append(f"{start}-{end}" if start != end else f"{start}")
     return ", ".join(ranges)
+
+def get_detailed_streaks(mgr_df):
+    max_w, max_l = 0, 0
+    best_w_span, best_l_span = "None", "None"
+    curr_w, curr_l = 0, 0
+    w_start, l_start = None, None
+    prev_season = None
+    
+    for _, row in mgr_df.iterrows():
+        s = str(row['Season']).replace('.0', '').strip()
+        w = row['Week']
+        res = row['Result']
+        
+        if prev_season is not None and s != prev_season:
+            curr_w, curr_l = 0, 0
+            w_start, l_start = None, None
+        prev_season = s
+        
+        game_label = f"{s}, W{w}"
+        if res == 'W':
+            if curr_w == 0: w_start = game_label
+            curr_w += 1
+            curr_l = 0
+            if curr_w > max_w:
+                max_w = curr_w
+                best_w_span = f"{w_start} to {game_label}" if curr_w > 1 else w_start
+        elif res == 'L':
+            if curr_l == 0: l_start = game_label
+            curr_l += 1
+            curr_w = 0
+            if curr_l > max_l:
+                max_l = curr_l
+                best_l_span = f"{l_start} to {game_label}" if curr_l > 1 else l_start
+        else:
+            curr_w, curr_l = 0, 0
+            w_start, l_start = None, None
+            
+    return max_w, best_w_span, max_l, best_l_span
+
 def get_playoff_outcome(playoff_games_for_season):
     if playoff_games_for_season.empty:
         return ""
@@ -154,7 +193,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         slot_c = 'Slot' if 'Slot' in df.columns else ('Lineup_Slot' if 'Lineup_Slot' in df.columns else 'Position')
         name_c = 'Player_Name' if 'Player_Name' in df.columns else 'Player'
         pts_c = 'Actual_Points' if 'Actual_Points' in df.columns else 'Points'
-        nfl_c = next((c for c in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev'] if c in df.columns), None)
+        nfl_c = next((c for c in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team'] if c in df.columns), None)
         df['NFL Team'] = df[nfl_c].fillna('').astype(str).str.strip() if nfl_c else ""
         
         stat_map = {
