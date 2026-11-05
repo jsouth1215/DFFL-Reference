@@ -33,13 +33,11 @@ def format_ordinal(val):
         return str(val)
 
 def format_ranges(nums):
-    if nums is None:
-        return ""
     try:
-        clean_nums = sorted(list(set(int(x) for x in nums if pd.notnull(x))))
+        clean_nums = sorted(list({int(x) for x in nums if pd.notnull(x)}))
     except Exception:
         return ""
-    if not clean_nums:
+    if len(clean_nums) == 0:
         return ""
     ranges = []
     start = clean_nums[0]
@@ -53,45 +51,6 @@ def format_ranges(nums):
             end = n
     ranges.append(f"{start}-{end}" if start != end else f"{start}")
     return ", ".join(ranges)
-
-def get_detailed_streaks(mgr_df):
-    max_w, max_l = 0, 0
-    best_w_span, best_l_span = "None", "None"
-    curr_w, curr_l = 0, 0
-    w_start, l_start = None, None
-    prev_season = None
-    
-    for _, row in mgr_df.iterrows():
-        s = str(row['Season']).replace('.0', '').strip()
-        w = row['Week']
-        res = row['Result']
-        
-        if prev_season is not None and s != prev_season:
-            curr_w, curr_l = 0, 0
-            w_start, l_start = None, None
-        prev_season = s
-        
-        game_label = f"{s}, W{w}"
-        if res == 'W':
-            if curr_w == 0: w_start = game_label
-            curr_w += 1
-            curr_l = 0
-            if curr_w > max_w:
-                max_w = curr_w
-                best_w_span = f"{w_start} to {game_label}" if curr_w > 1 else w_start
-        elif res == 'L':
-            if curr_l == 0: l_start = game_label
-            curr_l += 1
-            curr_w = 0
-            if curr_l > max_l:
-                max_l = curr_l
-                best_l_span = f"{l_start} to {game_label}" if curr_l > 1 else l_start
-        else:
-            curr_w, curr_l = 0, 0
-            w_start, l_start = None, None
-            
-    return max_w, best_w_span, max_l, best_l_span
-
 def get_playoff_outcome(playoff_games_for_season):
     if playoff_games_for_season.empty:
         return ""
