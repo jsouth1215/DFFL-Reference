@@ -120,7 +120,7 @@ def render(games, box_df, teams, seasons_list):
             if pts <= 0: continue
             starts = len(grp)
             tms = ", ".join(sorted(set(t for t in grp['NFL_Team_Clean'] if t))) or "-"
-            t_str = ", ".join(sorted(set(grp['Season_Str']), key=lambda x: int(x) if x.isdigit() else 0)) if d_year == "All-Time" else format_ranges(grp['Week_Num'])
+t_str = ", ".join(sorted(set(grp['Season_Str']), key=lambda x: int(x) if x.isdigit() else 0)) if d_year == "All-Time" else format_ranges(grp['Week_Num'].dropna().tolist())
             row = {'Player': player, 'NFL Team': tms, 'Starts': starts, 'Points_Num': pts, 'Points': f"{pts:.1f}", 'PPG': f"{pts/starts:.1f}", col_dyn: t_str}
             if p_target == 'QB': row.update({'Pass Yds': s_sum(grp, c_pyd), 'Pass TD': s_sum(grp, c_ptd), 'INT': s_sum(grp, c_int), 'Rush Yds': s_sum(grp, c_ryd), 'Rush TD': s_sum(grp, c_rtd)})
             elif p_target == 'RB': row.update({'Rush Yds': s_sum(grp, c_ryd), 'Rush TD': s_sum(grp, c_rtd), 'Rec': s_sum(grp, c_rec), 'Rec Yds': s_sum(grp, c_eyd), 'Rec TD': s_sum(grp, c_etd)})
