@@ -412,4 +412,78 @@ def render(games, box_df, rs_ranks_df, completed_playoff_seasons, teams, teams_n
         df_po = pd.DataFrame(po_rows).sort_values(['Appearances', 'Total_W', 'Byes'], ascending=[False, False, False])
         po_html = '<table style="width: 100%; border-collapse: collapse; text-align: center;"><thead><tr><th rowspan="2" style="border: 1px solid #e6e6e6;">Team</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Playoff Appearances</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Byes</th><th colspan="2" style="border: 1px solid #e6e6e6;">Total Postseason</th><th colspan="2" style="border: 1px solid #e6e6e6;">Quarterfinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Semifinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Finals</th></tr><tr><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th></tr></thead><tbody>' + "".join([f'<tr><td style="border: 1px solid #e6e6e6;">{r["Team"]}</td><td style="border: 1px solid #e6e6e6;">{r["Appearances"]}</td><td style="border: 1px solid #e6e6e6;">{r["Byes"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_L"]}</td></tr>' for _, r in df_po.iterrows()]) + '</tbody></table>'
         st.markdown(po_html, unsafe_allow_html=True)
+
+# ================= METLIFE DERBY: NYG VS NYJ BREAKDOWN =================
+with st.expander("🗽 MetLife Derby: NY Giants vs. NY Jets Usage Across Managers", expanded=False):
+    st.write("Compare all-time reliance on the two New York NFL franchises by fantasy manager.")
+    
+    # Metric Selector
+    chart_metric = st.radio(
+        "Metric:",
+        ["Total Starts", "Total Fantasy Points"],
+        horizontal=True,
+        key="nyj_nyg_metric"
+    )
+    
+    # 1. Filter starter data for eligible games
+    el_g_all = games[games['Game_Type'].isin([1, 2, 4]) & (games['Team_Name'].str.upper() != 'CAM')][['Season', 'Week', 'Team_Name']].drop_duplicates()
+    el_g_all['Season_Str'] = el_g_all['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    el_g_all['Week_Num'] = pd.to_numeric(el_g_all['Week'], errors='coerce').fillna(0).astype(int)
+    el_g_all['Team_Str'] = el_g_all['Team_Name'].astype(str).str.strip()
+
+    starters_all = box_df[~box_df['Slot'].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])].copy()
+    starters_all['Season_Str'] = starters_all['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    starters_all['Week_Num'] = pd.to_numeric(starters_all['Week'], errors='coerce').fillna(0).astype(int)
+    starters_all['Team_Str'] = starters_all['Team_Name'].astype(str).str.strip()
+    starters_all['Actual_Points'] = pd.to_numeric(starters_all['Actual_Points'], errors='coerce').fillna(0)
+
+    ny_starters = pd.merge(
+        starters_all,
+        el_g_all[['Season_Str', 'Week_Num', 'Team_Str']],
+        on=['Season_Str', 'Week_Num', 'Team_Str'],
+        how='inner'
+    )
+
+    # 2. Tag NYG and NYJ (including D/ST naming conventions)
+    def identify_ny_team(row):
+        abbr = str(row.get('NFL_Team', '')).upper().strip()
+        p_name = str(row.get('Player_Name', '')).upper()
+        if abbr in ['NYG', 'GIANTS'] or 'GIANTS' in p_name:
+            return 'New York Giants'
+        if abbr in ['NYJ', 'JETS'] or 'JETS' in p_name:
+            return 'New York Jets'
+        return None
+
+    ny_starters['NY_Franchise'] = ny_starters.apply(identify_ny_team, axis=1)
+    ny_only = ny_starters[ny_starters['NY_Franchise'].notnull()].copy()
+
+    if not ny_only.empty:
+        # 3. Aggregate starts and points
+        val_col = 'Starts' if chart_metric == "Total Starts" else 'Points'
+        
+        agg_ny = ny_only.groupby(['Team_Str', 'NY_Franchise']).agg(
+            Starts=('Actual_Points', 'count'),
+            Points=('Actual_Points', 'sum')
+        ).reset_index()
+
+        # 4. Pivot so managers are rows and Giants/Jets are side-by-side columns
+        pivot_ny = agg_ny.pivot(index='Team_Str', columns='NY_Franchise', values=val_col).fillna(0)
+        
+        # Ensure both columns exist even if a manager has 0 for one
+        for col_name in ['New York Giants', 'New York Jets']:
+            if col_name not in pivot_ny.columns:
+                pivot_ny[col_name] = 0.0
+
+        # Sort by total combined volume
+        pivot_ny['Combined'] = pivot_ny['New York Giants'] + pivot_ny['New York Jets']
+        pivot_ny = pivot_ny.sort_values('Combined', ascending=False).drop(columns=['Combined'])
+
+        # 5. Native Streamlit Grouped Bar Chart
+        st.bar_chart(
+            pivot_ny[['New York Giants', 'New York Jets']],
+            color=["#0B2265", "#125740"],  # Giants Blue and Jets Green
+            stack=False
+        )
+    else:
+        st.info("No starting lineup data found for NY Giants or NY Jets.")
         
