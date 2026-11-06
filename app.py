@@ -114,6 +114,24 @@ NFL_32_DEFENSES = [
     ("Washington Commanders", ["COMMANDERS", "REDSKINS", "FOOTBALL TEAM"], ["WAS", "WSH"]),
 ]
 
+NFL_ABBR_TO_FULL = {
+    'ARI': 'Arizona Cardinals', 'ATL': 'Atlanta Falcons', 'BAL': 'Baltimore Ravens',
+    'BUF': 'Buffalo Bills', 'CAR': 'Carolina Panthers', 'CHI': 'Chicago Bears',
+    'CIN': 'Cincinnati Bengals', 'CLE': 'Cleveland Browns', 'DAL': 'Dallas Cowboys',
+    'DEN': 'Denver Broncos', 'DET': 'Detroit Lions', 'GB': 'Green Bay Packers',
+    'HOU': 'Houston Texans', 'IND': 'Indianapolis Colts', 'JAX': 'Jacksonville Jaguars',
+    'JAC': 'Jacksonville Jaguars', 'KC': 'Kansas City Chiefs', 'LV': 'Las Vegas Raiders',
+    'OAK': 'Las Vegas Raiders', 'LAC': 'Los Angeles Chargers', 'SD': 'Los Angeles Chargers',
+    'LAR': 'Los Angeles Rams', 'LA': 'Los Angeles Rams', 'STL': 'Los Angeles Rams',
+    'MIA': 'Miami Dolphins', 'MIN': 'Minnesota Vikings', 'NE': 'New England Patriots',
+    'NO': 'New Orleans Saints', 'NYG': 'New York Giants', 'NYJ': 'New York Jets',
+    'PHI': 'Philadelphia Eagles', 'PIT': 'Pittsburgh Steelers', 'SF': 'San Francisco 49ers',
+    'SEA': 'Seattle Seahawks', 'TB': 'Tampa Bay Buccaneers', 'TEN': 'Tennessee Titans',
+    'WAS': 'Washington Commanders', 'WSH': 'Washington Commanders'
+}
+
+ALL_32_NFL_TEAMS = sorted(list(set(NFL_ABBR_TO_FULL.values())))
+
 def get_unstarted_defenses(dst_df, name_col):
     started = set()
     if not dst_df.empty:
@@ -1383,7 +1401,6 @@ with tab_player:
         counted['Clean_Pos'] = counted[pos_c].apply(clean_p)
         counted[pts_c] = pd.to_numeric(counted[pts_c], errors='coerce').fillna(0)
 
-        # Robust normalizer that handles spaces, underscores, and keyword fallbacks
         def find_c(cands, fallback_kws=None, fallback_exclude=None):
             for cand in cands:
                 cn = str(cand).lower().replace('_', '').replace(' ', '').replace('/', '').replace('-', '').strip()
@@ -1491,4 +1508,55 @@ with tab_player:
                     )
 
             st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+
+        # ================= 32-TEAM NFL FRANCHISE PRODUCTION TABLE =================
+        st.divider()
+        st.write(f"### NFL Franchise Production Breakdown ({d_year})")
+
+        def map_row_to_nfl_team(r):
+            abbr = str(r.get('NFL_Team_Clean', '')).strip().upper()
+            if abbr in NFL_ABBR_TO_FULL:
+                return NFL_ABBR_TO_FULL[abbr]
+            p_name = str(r.get(name_c, '')).upper()
+            for full_name, nicks, abbrs in NFL_32_DEFENSES:
+                if abbr in abbrs or any(nick in p_name for nick in nicks):
+                    return full_name
+            return None
+
+        counted_nfl = counted.copy()
+        counted_nfl['Mapped_NFL_Team'] = counted_nfl.apply(map_row_to_nfl_team, axis=1)
+
+        total_mgr_pts = counted_nfl[pts_c].sum()
+
+        nfl_summary_rows = []
+        for nfl_team in ALL_32_NFL_TEAMS:
+            t_data = counted_nfl[counted_nfl['Mapped_NFL_Team'] == nfl_team]
+            starts_cnt = len(t_data)
+            tot_pts = t_data[pts_c].sum()
+            pts_per_start = tot_pts / starts_cnt if starts_cnt > 0 else 0.0
+            pct_pts = (tot_pts / total_mgr_pts * 100) if total_mgr_pts > 0 else 0.0
             
+            if not t_data.empty and tot_pts > 0:
+                p_lead = t_data.groupby(name_c)[pts_c].sum().sort_values(ascending=False)
+                top_player_str = f"{p_lead.index[0]} ({p_lead.iloc[0]:.1f})"
+            else:
+                top_player_str = "-"
+
+            nfl_summary_rows.append({
+                'NFL Team': nfl_team,
+                'Starts': starts_cnt,
+                'Points_Num': tot_pts,
+                'Points': f"{tot_pts:.1f}",
+                'Pts / Start': f"{pts_per_start:.1f}",
+                '% of Team Pts': f"{pct_pts:.1f}%",
+                'Top Contributor': top_player_str
+            })
+
+        df_nfl = pd.DataFrame(nfl_summary_rows).sort_values(['Points_Num', 'Starts', 'NFL Team'], ascending=[False, False, True]).reset_index(drop=True)
+        df_nfl = apply_competition_rank(df_nfl, 'Points_Num', round_digits=1)
+
+        render_html_table(
+            df_nfl[['Rank', 'NFL Team', 'Starts', 'Points', 'Pts / Start', '% of Team Pts', 'Top Contributor']],
+            left_align_cols=['NFL Team', 'Top Contributor']
+        )
+    
