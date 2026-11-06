@@ -979,6 +979,7 @@ with tab3:
         st.write("No regular season data found.")
 
 # ================= TAB 4: RECORDS =================
+# ================= TAB 4: RECORDS =================
 with tab4:
     rec_categories = {
         "Game Records": [
@@ -1012,6 +1013,9 @@ with tab4:
             "Weekly Bag by Team",
             "Weekly Last Place Score by Team",
             "Playoff Record by Team"
+        ],
+        "Other": [
+            "MetLife Derby (NYG vs. NYJ Usage)"
         ]
     }
     if 'Top_2_Game' in games.columns:
@@ -1311,7 +1315,7 @@ with tab4:
             render_html_table(df[['Rank', 'Team', 'Points', 'Season', 'Week', 'Opponent']])
 
     elif rec_type == "Team Record - Lowest Score":
-        scores = [{'Team': t, 'Points_Num': float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']), 'Points': f"{float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']):.1f}", 'Season': str(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Season']).replace('.0',''), 'Week': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Week'], 'Opponent': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Opponent_Team_Name']} for t in teams_no_cam if not games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].empty]
+        scores = [{'Team': t, 'Points_Num': float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']), 'Points': f"{float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']):.1f}", 'Season': str(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Season']).replace('.0',''), 'Week': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Opponent_Team_Name']} for t in teams_no_cam if not games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].empty]
         if scores:
             df = pd.DataFrame(scores).sort_values(['Points_Num', 'Season'], ascending=[True, False]).reset_index(drop=True)
             df = apply_competition_rank(df, 'Points_Num', round_digits=1)
@@ -1360,6 +1364,81 @@ with tab4:
         po_html = '<table style="width: 100%; border-collapse: collapse; text-align: center;"><thead><tr><th rowspan="2" style="border: 1px solid #e6e6e6;">Team</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Playoff Appearances</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Byes</th><th colspan="2" style="border: 1px solid #e6e6e6;">Total Postseason</th><th colspan="2" style="border: 1px solid #e6e6e6;">Quarterfinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Semifinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Finals</th></tr><tr><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th></tr></thead><tbody>' + "".join([f'<tr><td style="border: 1px solid #e6e6e6;">{r["Team"]}</td><td style="border: 1px solid #e6e6e6;">{r["Appearances"]}</td><td style="border: 1px solid #e6e6e6;">{r["Byes"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_L"]}</td></tr>' for _, r in df_po.iterrows()]) + '</tbody></table>'
         st.markdown(po_html, unsafe_allow_html=True)
 
+    elif record_type == "MetLife Derby (NYG vs. NYJ Usage)":
+        st.write("### 🗽 MetLife Derby: NY Giants vs. NY Jets All-Time Usage Across Managers")
+        st.write("Compare all-time regular season and playoff starting lineup reliance on the two New York NFL franchises.")
+
+        col_m1, _ = st.columns([2, 3])
+        with col_m1:
+            chart_metric = st.radio(
+                "Select Metric:",
+                ["Total Starts", "Total Fantasy Points"],
+                horizontal=True,
+                key="metlife_chart_metric"
+            )
+
+        b_local = box_df.copy()
+        b_slot = 'Slot' if 'Slot' in b_local.columns else ('Lineup_Slot' if 'Lineup_Slot' in b_local.columns else 'Position')
+        b_name = 'Player_Name' if 'Player_Name' in b_local.columns else 'Player'
+        b_pts = 'Actual_Points' if 'Actual_Points' in b_local.columns else 'Points'
+        b_nfl = next((c for c in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team'] if c in b_local.columns), None)
+
+        b_local['Season_Str'] = b_local['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        b_local['Week_Num'] = pd.to_numeric(b_local['Week'], errors='coerce').fillna(0).astype(int)
+        b_local['Team_Str'] = b_local['Team_Name'].astype(str).str.strip()
+        b_local['NFL_Clean'] = b_local[b_nfl].fillna('').astype(str).str.strip().str.upper() if b_nfl else ""
+        b_local['Pts_Num'] = pd.to_numeric(b_local[b_pts], errors='coerce').fillna(0)
+
+        starters_mask = ~b_local[b_slot].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH'])
+        starters_ny = b_local[starters_mask].copy()
+
+        el_games_ny = games[games['Game_Type'].isin([1, 2, 4]) & (games['Team_Name'].str.upper() != 'CAM')][['Season', 'Week', 'Team_Name']].drop_duplicates()
+        el_games_ny['Season_Str'] = el_games_ny['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        el_games_ny['Week_Num'] = pd.to_numeric(el_games_ny['Week'], errors='coerce').fillna(0).astype(int)
+        el_games_ny['Team_Str'] = el_games_ny['Team_Name'].astype(str).str.strip()
+
+        ny_merged = pd.merge(
+            starters_ny,
+            el_games_ny[['Season_Str', 'Week_Num', 'Team_Str']],
+            on=['Season_Str', 'Week_Num', 'Team_Str'],
+            how='inner'
+        )
+
+        def classify_ny(row):
+            abbr = row['NFL_Clean']
+            p_str = str(row[b_name]).upper()
+            if abbr in ['NYG', 'GIANTS'] or 'GIANTS' in p_str:
+                return 'New York Giants'
+            if abbr in ['NYJ', 'JETS'] or 'JETS' in p_str:
+                return 'New York Jets'
+            return None
+
+        ny_merged['NY_Franchise'] = ny_merged.apply(classify_ny, axis=1)
+        ny_data = ny_merged[ny_merged['NY_Franchise'].notnull()].copy()
+
+        if not ny_data.empty:
+            agg_ny = ny_data.groupby(['Team_Str', 'NY_Franchise']).agg(
+                Starts=('Pts_Num', 'count'),
+                Points=('Pts_Num', 'sum')
+            ).reset_index()
+
+            val_col = 'Starts' if chart_metric == "Total Starts" else 'Points'
+            pivot_ny = agg_ny.pivot(index='Team_Str', columns='NY_Franchise', values=val_col).fillna(0)
+
+            for tm in ['New York Giants', 'New York Jets']:
+                if tm not in pivot_ny.columns:
+                    pivot_ny[tm] = 0.0
+
+            pivot_ny['Combined'] = pivot_ny['New York Giants'] + pivot_ny['New York Jets']
+            pivot_ny = pivot_ny.sort_values('Combined', ascending=False).drop(columns=['Combined'])
+
+            st.bar_chart(
+                pivot_ny[['New York Giants', 'New York Jets']],
+                color=["#0B2265", "#125740"],
+                stack=False
+            )
+        else:
+            st.info("No starter data found for NY Giants or NY Jets.")
 # ================= TAB 7: DETAILED PLAYER SCORING =================
 with tab_player:
     if box_df.empty:
