@@ -143,7 +143,7 @@ def get_unstarted_defenses(dst_df, name_col):
                     started.add(full_name)
     return [team[0] for team in NFL_32_DEFENSES if team[0] not in started]
 
-# ================= DATA LOADERS & PROCESSING =================
+# ================= DATA LOADERS =================
 @st.cache_data(ttl=600)
 def load_box_scores():
     try:
@@ -660,25 +660,6 @@ def get_monday_comebacks(box_df, games):
         res['Rank'] = res.index + 1
         return res[['Rank', 'Deficit Overcome', 'Final Score', 'Winner', 'Loser', 'Season', 'Week', 'Winning Team Monday Players', 'Losing Team Monday Players']]
     return pd.DataFrame()
-
-# ================= GLOBAL DATA INITIALIZATION =================
-st.title("🏈 DFFL History Hub")
-
-games = load_data()
-box_df = load_box_scores()
-game_top_map = get_game_top_scorers(box_df)
-
-teams = sorted(games['Team_Name'].dropna().unique().tolist())
-teams_no_cam = sorted([t for t in teams if str(t).strip().upper() != 'CAM'])
-seasons_list = sorted(
-    games['Season'].dropna().unique().tolist(),
-    key=lambda x: int(x) if str(x).isdigit() else 0,
-    reverse=True
-)
-completed_playoff_seasons = set(
-    games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
-)
-rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
 
 # ================= TAB DECLARATIONS =================
 tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
@@ -1382,7 +1363,7 @@ with tab4:
         for (tm, opp), m_grp in comp_g.groupby(['Team_Name', 'Opponent_Team_Name']):
             m_list = m_grp.to_dict('records')
             curr_streak = 0
-            po_count = 0
+            po_games = []
             start_r = None
             end_r = None
             
@@ -1390,17 +1371,20 @@ with tab4:
                 if row['W'] == 1:
                     if curr_streak == 0:
                         start_r = row
-                        po_count = 0
+                        po_games = []
                     curr_streak += 1
                     if row['Game_Type'] == 2:
-                        po_count += 1
+                        rnd = str(row.get('Playoff_Round', '')).strip()
+                        szn = str(row['Season']).replace('.0', '').strip()
+                        rnd_clean = rnd.title() if rnd else "Playoffs"
+                        po_games.append(f"{rnd_clean} {szn}")
                     end_r = row
                 else:
                     if curr_streak >= 6:
                         s_lbl = f"{str(start_r['Season']).replace('.0','')}, W{start_r['Week']}"
                         e_lbl = f"{str(end_r['Season']).replace('.0','')}, W{end_r['Week']}"
                         span_str = s_lbl if curr_streak == 1 else f"{s_lbl} to {e_lbl}"
-                        po_str = f"Yes ({po_count})" if po_count > 1 else ("Yes" if po_count == 1 else "")
+                        po_str = ", ".join(po_games)
                         h2h_streaks.append({
                             'Team': tm,
                             'Opponent': opp,
@@ -1413,7 +1397,7 @@ with tab4:
                             'End_Week': float(end_r['Week_Num'])
                         })
                     curr_streak = 0
-                    po_count = 0
+                    po_games = []
                     start_r = None
                     end_r = None
                     
@@ -1421,7 +1405,7 @@ with tab4:
                 s_lbl = f"{str(start_r['Season']).replace('.0','')}, W{start_r['Week']}"
                 e_lbl = f"{str(end_r['Season']).replace('.0','')}, W{end_r['Week']}"
                 span_str = s_lbl if curr_streak == 1 else f"{s_lbl} to {e_lbl}"
-                po_str = f"Yes ({po_count})" if po_count > 1 else ("Yes" if po_count == 1 else "")
+                po_str = ", ".join(po_games)
                 h2h_streaks.append({
                     'Team': tm,
                     'Opponent': opp,
@@ -1517,13 +1501,11 @@ with tab4:
         st.write("### NFL Franchise Usage Matrix (12 Fantasy Teams x 32 NFL Teams)")
         st.write("Cross-tabulated reliance of all 12 fantasy franchises across all 32 NFL teams (Starters in Regular Season & Playoffs).")
 
-        c1, c2, c3 = st.columns([1.5, 1.5, 2])
+        c1, c2 = st.columns([1.5, 2])
         with c1:
             sel_nfl_szn = st.selectbox("Season:", ["All-Time"] + seasons_list, key="nfl_mat_szn")
         with c2:
             sel_nfl_met = st.radio("Metric:", ["Total Fantasy Points", "Total Starts"], horizontal=True, key="nfl_mat_met")
-        with c3:
-            sel_nfl_view = st.radio("Chart View:", ["By NFL Team (32 Franchises)", "By Fantasy Manager (12 Teams)"], horizontal=True, key="nfl_mat_view")
 
         slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
         name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
@@ -1582,20 +1564,16 @@ with tab4:
                     pivot_mat[tm] = 0.0
             pivot_mat = pivot_mat[teams_no_cam]
 
-            if sel_nfl_view == "By NFL Team (32 Franchises)":
-                st.bar_chart(pivot_mat, stack=True)
-            else:
-                st.bar_chart(pivot_mat.T, stack=True)
-
-            st.write("#### Cross-Tabulation Matrix")
             table_mat = pivot_mat.copy()
             table_mat['Total'] = table_mat[teams_no_cam].sum(axis=1)
             table_mat = table_mat.sort_values('Total', ascending=False)
 
-            if val_metric == 'Points':
-                table_disp = table_mat.applymap(lambda v: f"{float(v):,.1f}")
-            else:
-                table_disp = table_mat.applymap(lambda v: f"{int(v):,}")
+            table_disp = pd.DataFrame(index=table_mat.index)
+            for col in table_mat.columns:
+                if val_metric == 'Points':
+                    table_disp[col] = table_mat[col].apply(lambda v: f"{float(v):,.1f}")
+                else:
+                    table_disp[col] = table_mat[col].apply(lambda v: f"{int(v):,}")
 
             table_disp = table_disp.reset_index().rename(columns={'Mapped_NFL_Team': 'NFL Team'})
             
