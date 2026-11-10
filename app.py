@@ -440,18 +440,66 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
         pts_c = 'Actual_Points' if 'Actual_Points' in df.columns else 'Points'
         nfl_c = next((c for c in ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team'] if c in df.columns), None)
         df['NFL Team'] = df[nfl_c].fillna('').astype(str).str.strip() if nfl_c else ""
-        
-        stat_map = {
-            'Passing_Yards': 'Pass Yds', 'Passing_TDs': 'Pass TD', 'Passing_Interceptions': 'INT',
-            'Rushing_Yards': 'Rush Yds', 'Rushing_TDs': 'Rush TD',
-            'Receptions': 'Rec', 'Receiving_Yards': 'Rec Yds', 'Receiving_TDs': 'Rec TD'
-        }
+
+        def find_sc(cands, fallback_kws=None, fallback_exclude=None):
+            for cand in cands:
+                cn = str(cand).lower().replace('_', '').replace(' ', '').replace('/', '').replace('-', '').strip()
+                for c in df.columns:
+                    c_norm = str(c).lower().replace('_', '').replace(' ', '').replace('/', '').replace('-', '').strip()
+                    if c_norm == cn:
+                        return c
+            if fallback_kws:
+                for c in df.columns:
+                    c_str = str(c).lower().replace(' ', '_')
+                    if all(kw in c_str for kw in fallback_kws):
+                        if fallback_exclude and any(ex in c_str for ex in fallback_exclude):
+                            continue
+                        return c
+            return None
+
+        c_pyd = find_sc(['Passing_Yards', 'Pass_Yds', 'Pass_Yards', 'Passing_Yds', 'Passing Yards', 'Pass Yds'], fallback_kws=['pass', 'yd'])
+        c_ptd = find_sc(['Passing_TDs', 'Pass_TD', 'Pass_TDs', 'Passing_Touchdowns', 'Passing TDs', 'Pass TD'], fallback_kws=['pass', 'td'], fallback_exclude=['rush', 'rec', 'def'])
+        c_int = find_sc(['Passing_Interceptions', 'Passing_Int', 'Pass_Int', 'Interceptions', 'INT', 'Pass INT'], fallback_kws=['int'], fallback_exclude=['def'])
+        c_ryd = find_sc(['Rushing_Yards', 'Rush_Yds', 'Rush_Yards', 'Rushing_Yds', 'Rushing Yards', 'Rush Yds'], fallback_kws=['rush', 'yd'])
+        c_rtd = find_sc(['Rushing_TDs', 'Rush_TD', 'Rush_TDs', 'Rushing_Touchdowns', 'Rushing TDs', 'Rush TD'], fallback_kws=['rush', 'td'], fallback_exclude=['pass', 'rec', 'def'])
+        c_rec = find_sc(['Receptions', 'Rec', 'Catches'], fallback_kws=['rec'], fallback_exclude=['yard', 'td', 'pass', 'rush', 'def', 'fum', 'int'])
+        c_eyd = find_sc(['Receiving_Yards', 'Rec_Yds', 'Rec_Yards', 'Receiving_Yds', 'Receiving Yards', 'Rec Yds'], fallback_kws=['rec', 'yd'], fallback_exclude=['pass', 'rush'])
+        c_etd = find_sc(['Receiving_TDs', 'Rec_TD', 'Rec_TDs', 'Receiving_Touchdowns', 'Receiving TDs', 'Rec TD'], fallback_kws=['rec', 'td'], fallback_exclude=['pass', 'rush', 'def', 'int', 'fum'])
+        c_sck = find_sc(['Sacks', 'Sack'])
+        c_dint = find_sc(['Defensive_Interceptions', 'Def_INT', 'Defensive_Int'], fallback_kws=['def', 'int'])
+        c_fr = find_sc(['Fumbles_Recovered', 'FR', 'Fum_Rec'], fallback_kws=['fum', 'rec'])
+        c_dtd = find_sc(['Defensive_TDs', 'Def_TD', 'Def_TDs'], fallback_kws=['def', 'td'])
+        c_fgm = find_sc(['Field_Goals_Made', 'FGM', 'FG_Made'], fallback_kws=['fg', 'made'])
+        c_xpm = find_sc(['Extra_Points_Made', 'XPM', 'XP_Made'], fallback_kws=['xp', 'made'])
+
+        stat_pairs = [
+            (c_pyd, 'Pass Yds'),
+            (c_ptd, 'Pass TD'),
+            (c_int, 'INT'),
+            (c_ryd, 'Rush Yds'),
+            (c_rtd, 'Rush TD'),
+            (c_rec, 'Rec'),
+            (c_eyd, 'Rec Yds'),
+            (c_etd, 'Rec TD'),
+            (c_sck, 'Sacks'),
+            (c_dint, 'Def INT'),
+            (c_fr, 'FR'),
+            (c_dtd, 'Def TD'),
+            (c_fgm, 'FGM'),
+            (c_xpm, 'XPM'),
+        ]
+
         def make_blurb(row):
             b = []
-            for k, lbl in stat_map.items():
-                if k in df.columns and pd.notnull(row[k]) and float(row[k]) != 0:
-                    v = int(float(row[k])) if float(row[k]).is_integer() else float(row[k])
-                    b.append(f"{v} {lbl}")
+            for col, lbl in stat_pairs:
+                if col and col in df.columns and pd.notnull(row.get(col)):
+                    try:
+                        val = float(row[col])
+                        if val != 0:
+                            v_str = f"{int(val)}" if val.is_integer() else f"{val:.1f}"
+                            b.append(f"{v_str} {lbl}")
+                    except (ValueError, TypeError):
+                        pass
             return ", ".join(b)
             
         df['Stats'] = df.apply(make_blurb, axis=1)
@@ -1039,16 +1087,49 @@ with tab3:
         szn_games['N_Teams'] = szn_games.groupby('Week_Num')['Team_Name'].transform('count')
         szn_games['Exp_Win'] = szn_games.apply(lambda r: (r['N_Teams'] - r['Weekly_Rank']) / (r['N_Teams'] - 1) if r['N_Teams'] > 1 else 0.0, axis=1)
         
-        stnd = szn_games.groupby('Team_Name').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum'), PA=('Opp_Points', 'sum'), Exp_Win_Total=('Exp_Win', 'sum')).reset_index()
-        stnd['Win_Pct_Raw'] = (stnd['W'] / (stnd['W'] + stnd['L'] + stnd['T'])).fillna(0)
+        def calc_streak(tm_df):
+            if tm_df.empty: return ""
+            ordered = tm_df.sort_values('Week_Num')
+            results = []
+            for _, r in ordered.iterrows():
+                res = 'W' if r['W'] == 1 else ('L' if r['L'] == 1 else ('T' if r['T'] == 1 else ''))
+                if res:
+                    results.append(res)
+            if not results: return ""
+            last = results[-1]
+            cnt = 0
+            for r in reversed(results):
+                if r == last:
+                    cnt += 1
+                else:
+                    break
+            return f"{last}{cnt}"
+
+        streaks_dict = szn_games.groupby('Team_Name').apply(calc_streak).to_dict()
+        bags_dict = szn_games.groupby('Team_Name')['Is_High_Scorer'].sum().to_dict()
+
+        stnd = szn_games.groupby('Team_Name').agg(
+            W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'),
+            PF=('Actual_Points', 'sum'), PA=('Opp_Points', 'sum'),
+            Exp_Win_Total=('Exp_Win', 'sum')
+        ).reset_index()
+        
+        stnd['GP'] = stnd['W'] + stnd['L'] + stnd['T']
+        stnd['Win_Pct_Raw'] = (stnd['W'] / stnd['GP']).fillna(0)
         stnd = stnd.sort_values(['Win_Pct_Raw', 'PF'], ascending=[False, False]).reset_index(drop=True)
         stnd['Rank'] = (stnd.index + 1).map(lambda x: f"{x}{'th' if 11 <= x % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(x % 10, 'th')}")
         stnd['Win %'] = stnd['Win_Pct_Raw'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1 else f"{x:.3f}")
+        stnd['Streak'] = stnd['Team_Name'].map(streaks_dict).fillna("")
+        stnd['PF/G'] = (stnd['PF'] / stnd['GP']).apply(lambda x: f"{float(x):.1f}")
+        stnd['PA/G'] = (stnd['PA'] / stnd['GP']).apply(lambda x: f"{float(x):.1f}")
         stnd['PF'] = stnd['PF'].apply(lambda x: f"{float(x):.1f}")
         stnd['PA'] = stnd['PA'].apply(lambda x: f"{float(x):.1f}")
+        stnd['Weekly Bags'] = stnd['Team_Name'].map(bags_dict).fillna(0).astype(int)
         stnd['Expected Wins'] = stnd['Exp_Win_Total'].apply(lambda x: f"{float(x):.1f}")
         stnd['Luck Factor'] = stnd.apply(lambda r: "0.0" if abs(r['W']-r['Exp_Win_Total'])<0.05 else f"{r['W']-r['Exp_Win_Total']:+.1f}", axis=1)
-        render_html_table(stnd[['Rank', 'Team_Name', 'W', 'L', 'T', 'Win %', 'PF', 'PA', 'Expected Wins', 'Luck Factor']].rename(columns={'Team_Name': 'Team'}))
+        
+        cols_disp = ['Rank', 'Team_Name', 'W', 'L', 'T', 'Win %', 'Streak', 'PF', 'PF/G', 'PA', 'PA/G', 'Weekly Bags', 'Expected Wins', 'Luck Factor']
+        render_html_table(stnd[cols_disp].rename(columns={'Team_Name': 'Team'}))
     else:
         st.write("No regular season data found.")
 
