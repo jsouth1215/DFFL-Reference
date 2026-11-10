@@ -661,6 +661,25 @@ def get_monday_comebacks(box_df, games):
         return res[['Rank', 'Deficit Overcome', 'Final Score', 'Winner', 'Loser', 'Season', 'Week', 'Winning Team Monday Players', 'Losing Team Monday Players']]
     return pd.DataFrame()
 
+# ================= GLOBAL DATA INITIALIZATION =================
+st.title("🏈 DFFL History Hub")
+
+games = load_data()
+box_df = load_box_scores()
+game_top_map = get_game_top_scorers(box_df)
+
+teams = sorted(games['Team_Name'].dropna().unique().tolist())
+teams_no_cam = sorted([t for t in teams if str(t).strip().upper() != 'CAM'])
+seasons_list = sorted(
+    games['Season'].dropna().unique().tolist(),
+    key=lambda x: int(x) if str(x).isdigit() else 0,
+    reverse=True
+)
+completed_playoff_seasons = set(
+    games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
+)
+rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
+
 # ================= TAB DECLARATIONS =================
 tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
     "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Detailed Player Scoring"
