@@ -1014,6 +1014,7 @@ with tab4:
             "Playoff Record by Team"
         ],
         "Other": [
+            "Weekly Scoring Rank Heatmap",
             "Jets/Giants Usage Chart"
         ]
     }
@@ -1363,6 +1364,76 @@ with tab4:
         po_html = '<table style="width: 100%; border-collapse: collapse; text-align: center;"><thead><tr><th rowspan="2" style="border: 1px solid #e6e6e6;">Team</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Playoff Appearances</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Byes</th><th colspan="2" style="border: 1px solid #e6e6e6;">Total Postseason</th><th colspan="2" style="border: 1px solid #e6e6e6;">Quarterfinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Semifinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Finals</th></tr><tr><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th></tr></thead><tbody>' + "".join([f'<tr><td style="border: 1px solid #e6e6e6;">{r["Team"]}</td><td style="border: 1px solid #e6e6e6;">{r["Appearances"]}</td><td style="border: 1px solid #e6e6e6;">{r["Byes"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_L"]}</td></tr>' for _, r in df_po.iterrows()]) + '</tbody></table>'
         st.markdown(po_html, unsafe_allow_html=True)
 
+    elif rec_type == "Weekly Scoring Rank Heatmap":
+        st.write("### Weekly Scoring Rank Heatmap")
+        st.write("Weekly score rankings of each team during the regular season. Green indicates a matchup win and red indicates a loss. The dashed line divides the top half from the bottom half.")
+
+        c1, c2 = st.columns([2, 2])
+        with c1:
+            sel_heat_szn = st.selectbox("Select Season:", seasons_list, key="heat_szn_select")
+        with c2:
+            st.write("")
+            st.write("")
+            show_pts = st.checkbox("Show Points with Team Name", value=False, key="heat_show_pts")
+
+        szn_g = games[(games['Season'] == str(sel_heat_szn)) & (games['Game_Type'] == 1)].copy()
+        if not szn_g.empty:
+            weeks_in_szn = sorted(szn_g['Week_Num'].dropna().unique().astype(int))
+            all_teams_in_szn = sorted(szn_g['Team_Name'].dropna().unique().tolist())
+            total_teams = len(all_teams_in_szn)
+            median_rank = total_teams // 2 if total_teams > 0 else 6
+
+            # Rank teams by week
+            week_rankings = {}
+            for w in weeks_in_szn:
+                wk_df = szn_g[szn_g['Week_Num'] == w].sort_values(by=['Actual_Points'], ascending=False).reset_index(drop=True)
+                for r_idx, row in wk_df.iterrows():
+                    r_num = r_idx + 1
+                    t_name = str(row['Team_Name']).strip()
+                    pts = float(row['Actual_Points'])
+                    outcome = 'win' if row['W'] == 1 else ('loss' if row['L'] == 1 else 'tie')
+                    week_rankings[(r_num, w)] = (t_name, pts, outcome)
+
+            # Build HTML Table
+            html_rows = []
+            # Header
+            header_cells = '<th style="border: 1px solid #c0c0c0; background-color: #f2f2f2; padding: 6px 12px; font-weight: 700;">Rank</th>'
+            for w in weeks_in_szn:
+                header_cells += f'<th style="border: 1px solid #c0c0c0; background-color: #f2f2f2; padding: 6px 14px; font-weight: 700;">{w}</th>'
+            html_rows.append(f'<thead><tr>{header_cells}</tr></thead><tbody>')
+
+            for r_num in range(1, total_teams + 1):
+                is_median_row = (r_num == median_rank)
+                row_border_style = "border-bottom: 2.5px dashed #111111;" if is_median_row else "border-bottom: 1px solid #c0c0c0;"
+                
+                cells = f'<td style="border: 1px solid #c0c0c0; {row_border_style} background-color: #f9f9f9; font-weight: 700; padding: 6px 10px;">{r_num}</td>'
+                for w in weeks_in_szn:
+                    entry = week_rankings.get((r_num, w), None)
+                    if entry:
+                        t_name, pts, outcome = entry
+                        if outcome == 'win':
+                            bg_color = "#d9ead3"
+                            text_color = "#155724"
+                        elif outcome == 'loss':
+                            bg_color = "#f4cccc"
+                            text_color = "#721c24"
+                        else:
+                            bg_color = "#fff2cc"
+                            text_color = "#7f6000"
+                        
+                        disp_text = f"{t_name} ({pts:.1f})" if show_pts else t_name
+                        cells += f'<td style="border: 1px solid #c0c0c0; {row_border_style} background-color: {bg_color}; color: {text_color}; padding: 6px 10px; white-space: nowrap;">{disp_text}</td>'
+                    else:
+                        cells += f'<td style="border: 1px solid #c0c0c0; {row_border_style} background-color: #ffffff; color: #888888; padding: 6px 10px;">-</td>'
+
+                html_rows.append(f'<tr>{cells}</tr>')
+
+            html_rows.append('</tbody>')
+            full_table_html = f'<table style="width: auto; border-collapse: collapse; text-align: center; font-size: 14px; margin-top: 15px;">{"".join(html_rows)}</table>'
+            st.markdown(full_table_html, unsafe_allow_html=True)
+        else:
+            st.info("No regular season matchup data found for the selected season.")
+
     elif rec_type == "Jets/Giants Usage Chart":
         st.write("### Jets/Giants Usage Chart")
         st.write("Compare all-time regular season and playoff starting lineup reliance on the two New York NFL franchises.")
@@ -1638,4 +1709,4 @@ with tab_player:
             df_nfl[['Rank', 'NFL Team', 'Starts', 'Points', 'Pts / Start', '% of Team Pts', 'Top Contributor']],
             left_align_cols=['NFL Team', 'Top Contributor']
         )
-    
+        
