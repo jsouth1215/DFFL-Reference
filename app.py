@@ -143,7 +143,7 @@ def get_unstarted_defenses(dst_df, name_col):
                     started.add(full_name)
     return [team[0] for team in NFL_32_DEFENSES if team[0] not in started]
 
-# ================= DATA LOADERS & PROCESSING =================
+# ================= DATA LOADERS =================
 @st.cache_data(ttl=600)
 def load_box_scores():
     try:
@@ -660,6 +660,25 @@ def get_monday_comebacks(box_df, games):
         res['Rank'] = res.index + 1
         return res[['Rank', 'Deficit Overcome', 'Final Score', 'Winner', 'Loser', 'Season', 'Week', 'Winning Team Monday Players', 'Losing Team Monday Players']]
     return pd.DataFrame()
+
+# ================= GLOBAL DATA INITIALIZATION =================
+st.title("🏈 DFFL History Hub")
+
+games = load_data()
+box_df = load_box_scores()
+game_top_map = get_game_top_scorers(box_df)
+
+teams = sorted(games['Team_Name'].dropna().unique().tolist())
+teams_no_cam = sorted([t for t in teams if str(t).strip().upper() != 'CAM'])
+seasons_list = sorted(
+    games['Season'].dropna().unique().tolist(),
+    key=lambda x: int(x) if str(x).isdigit() else 0,
+    reverse=True
+)
+completed_playoff_seasons = set(
+    games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
+)
+rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
 
 # ================= TAB DECLARATIONS =================
 tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
@@ -1371,7 +1390,7 @@ with tab4:
             render_html_table(df[['Rank', 'Team', 'Points', 'Season', 'Week', 'Opponent']])
 
     elif rec_type == "Team Record - Lowest Score":
-        scores = [{'Team': t, 'Points_Num': float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']), 'Points': f"{float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']):.1f}", 'Season': str(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Season']).replace('.0',''), 'Week': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Opponent_Team_Name']} for t in teams_no_cam if not games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].empty]
+        scores = [{'Team': t, 'Points_Num': float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']), 'Points': f"{float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']):.1f}", 'Season': str(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Season']).replace('.0',''), 'Week': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Week'], 'Opponent': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Opponent_Team_Name']} for t in teams_no_cam if not games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].empty]
         if scores:
             df = pd.DataFrame(scores).sort_values(['Points_Num', 'Season'], ascending=[True, False]).reset_index(drop=True)
             df = apply_competition_rank(df, 'Points_Num', round_digits=1)
