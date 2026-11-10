@@ -143,7 +143,7 @@ def get_unstarted_defenses(dst_df, name_col):
                     started.add(full_name)
     return [team[0] for team in NFL_32_DEFENSES if team[0] not in started]
 
-# ================= DATA LOADERS =================
+# ================= DATA LOADERS & PROCESSING =================
 @st.cache_data(ttl=600)
 def load_box_scores():
     try:
@@ -661,25 +661,6 @@ def get_monday_comebacks(box_df, games):
         return res[['Rank', 'Deficit Overcome', 'Final Score', 'Winner', 'Loser', 'Season', 'Week', 'Winning Team Monday Players', 'Losing Team Monday Players']]
     return pd.DataFrame()
 
-# ================= GLOBAL DATA INITIALIZATION =================
-st.title("🏈 DFFL History Hub")
-
-games = load_data()
-box_df = load_box_scores()
-game_top_map = get_game_top_scorers(box_df)
-
-teams = sorted(games['Team_Name'].dropna().unique().tolist())
-teams_no_cam = sorted([t for t in teams if str(t).strip().upper() != 'CAM'])
-seasons_list = sorted(
-    games['Season'].dropna().unique().tolist(),
-    key=lambda x: int(x) if str(x).isdigit() else 0,
-    reverse=True
-)
-completed_playoff_seasons = set(
-    games[games['Game_Type'] == 2]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().unique()
-)
-rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
-
 # ================= TAB DECLARATIONS =================
 tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
     "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Detailed Player Scoring"
@@ -914,7 +895,81 @@ with tab6:
         weeks = sorted(box_df[box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)]['Week'].dropna().unique().tolist())
         b_week = c2.selectbox("Week", weeks, key="b_wk")
         avail_teams = sorted(box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)) & (box_df['Week'] == b_week)]['Team_Name'].dropna().unique().tolist())
+        
+        if "b_tm" in st.session_state and st.session_state["b_tm"] not in avail_teams and avail_teams:
+            st.session_state["b_tm"] = avail_teams[0]
+
         b_team = c3.selectbox("Manager", avail_teams, key="b_tm")
+
+        # --- Interactive Weekly Matchup Row ---
+        b_szn_str = str(b_season).replace('.0', '').strip()
+        b_wk_int = int(b_week)
+
+        wk_games = games[
+            (games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == b_szn_str) &
+            (games['Week_Num'] == b_wk_int) &
+            (games['Team_Name'].str.upper() != 'CAM')
+        ].copy()
+
+        seen_pairs = set()
+        matchup_list = []
+        for _, r in wk_games.iterrows():
+            t1 = str(r['Team_Name']).strip()
+            t2 = str(r['Opponent_Team_Name']).strip()
+            if t2.upper() == 'CAM':
+                continue
+            pair_key = tuple(sorted([t1.upper(), t2.upper()]))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+
+            p1 = float(r['Actual_Points'])
+            p2 = float(r['Opp_Points'])
+            gt = int(r.get('Game_Type', 1))
+
+            if t2.upper() == 'BYE' or gt == 4:
+                matchup_list.append({
+                    'team1': t1, 'pts1': p1,
+                    'team2': 'BYE', 'pts2': 0.0,
+                    'is_bye': True
+                })
+            else:
+                if p2 > p1:
+                    t1, t2 = t2, t1
+                    p1, p2 = p2, p1
+                matchup_list.append({
+                    'team1': t1, 'pts1': p1,
+                    'team2': t2, 'pts2': p2,
+                    'is_bye': False
+                })
+
+        if matchup_list:
+            def set_box_manager(target_mgr):
+                st.session_state["b_tm"] = target_mgr
+
+            st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+            m_cols = st.columns(len(matchup_list))
+            for idx, m in enumerate(matchup_list):
+                is_active = (b_team in [m['team1'], m['team2']])
+                btn_type = "primary" if is_active else "secondary"
+                
+                if m['is_bye']:
+                    lbl = f"{m['team1']} ({m['pts1']:.1f})  \nBYE"
+                else:
+                    lbl = f"{m['team1']} {m['pts1']:.1f}  \n{m['team2']} {m['pts2']:.1f}"
+
+                target_mgr = m['team2'] if (b_team == m['team1'] and not m['is_bye']) else m['team1']
+
+                m_cols[idx].button(
+                    lbl,
+                    key=f"btn_match_{b_szn_str}_{b_wk_int}_{idx}",
+                    type=btn_type,
+                    use_container_width=True,
+                    on_click=set_box_manager,
+                    args=(target_mgr,)
+                )
+            st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+
         if b_team:
             display_box_score(b_season, b_week, b_team, box_df, games)
 
@@ -1316,7 +1371,7 @@ with tab4:
             render_html_table(df[['Rank', 'Team', 'Points', 'Season', 'Week', 'Opponent']])
 
     elif rec_type == "Team Record - Lowest Score":
-        scores = [{'Team': t, 'Points_Num': float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']), 'Points': f"{float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']):.1f}", 'Season': str(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Season']).replace('.0',''), 'Week': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Week'], 'Opponent': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Opponent_Team_Name']} for t in teams_no_cam if not games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].empty]
+        scores = [{'Team': t, 'Points_Num': float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']), 'Points': f"{float(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Actual_Points']):.1f}", 'Season': str(games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Season']).replace('.0',''), 'Week': games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].loc[games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)]['Actual_Points'].idxmin()]['Opponent_Team_Name']} for t in teams_no_cam if not games[(games['Team_Name']==t) & (games['Game_Type'].isin([1, 2])) & (games['Actual_Points']>0)].empty]
         if scores:
             df = pd.DataFrame(scores).sort_values(['Points_Num', 'Season'], ascending=[True, False]).reset_index(drop=True)
             df = apply_competition_rank(df, 'Points_Num', round_digits=1)
@@ -1590,9 +1645,9 @@ with tab4:
             table_disp = pd.DataFrame(index=table_mat.index)
             for col in table_mat.columns:
                 if val_metric == 'Points':
-                    table_disp[col] = table_mat[col].apply(lambda v: f"{float(v):,.1f}")
+                    table_disp[col] = table_mat[col].map(lambda v: f"{float(v):,.1f}")
                 else:
-                    table_disp[col] = table_mat[col].apply(lambda v: f"{int(v):,}")
+                    table_disp[col] = table_mat[col].map(lambda v: f"{int(v):,}")
 
             table_disp = table_disp.reset_index().rename(columns={'Mapped_NFL_Team': 'NFL Team'})
             
