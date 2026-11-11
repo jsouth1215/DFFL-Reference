@@ -1162,6 +1162,7 @@ with tab4:
             "Lowest Season Luck Factor"
         ],
         "Franchise Records": [
+            "All-Time Records",
             "Team Record - Highest Score",
             "Team Record - Lowest Score",
             "Weekly Bag by Team",
@@ -1220,7 +1221,110 @@ with tab4:
 
     s_comp = s_agg[s_agg['Season'].isin(completed_playoff_seasons)].copy() if not s_agg.empty else pd.DataFrame()
 
-    if rec_type == "Highest Scoring Weeks":
+    if rec_type == "All-Time Records":
+        st.write("### All-Time Records")
+        st.write("Regular season win-loss records by season. Green indicates a playoff berth, and bold with a trophy (🏆) indicates the league champion.")
+
+        all_szns = sorted([str(s).replace('.0', '').strip() for s in games['Season'].dropna().unique() if str(s).replace('.0', '').strip().isdigit()], key=lambda x: int(x))
+        
+        # Determine playoff teams and champions per season
+        po_games = games[games['Game_Type'] == 2]
+        po_teams_by_szn = {}
+        for s, grp in po_games.groupby('Season'):
+            s_str = str(s).replace('.0', '').strip()
+            po_teams_by_szn[s_str] = set(grp['Team_Name'].dropna().unique())
+
+        finals_games = games[
+            (games['Game_Type'] == 2) & 
+            (games['Playoff_Round'].astype(str).str.strip().str.lower().isin(['finals', 'championship'])) & 
+            (games['W'] == 1)
+        ]
+        champ_by_szn = dict(zip(
+            finals_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip(),
+            finals_games['Team_Name'].astype(str).str.strip()
+        ))
+
+        reg_data = games[(games['Game_Type'] == 1) & (games['Team_Name'].str.upper() != 'CAM')].copy()
+        reg_data['Season_Str'] = reg_data['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        reg_data['Team_Str'] = reg_data['Team_Name'].astype(str).str.strip()
+
+        reg_counts = reg_data.groupby(['Team_Str', 'Season_Str']).agg(
+            W=('W', 'sum'),
+            L=('L', 'sum'),
+            T=('T', 'sum')
+        ).reset_index()
+
+        table_rows = []
+        for tm in teams_no_cam:
+            row_data = {'Team': tm, 'tot_w': 0, 'tot_l': 0, 'tot_t': 0, 'cells': {}}
+            for s in all_szns:
+                sub = reg_counts[(reg_counts['Team_Str'] == tm) & (reg_counts['Season_Str'] == s)]
+                if not sub.empty:
+                    w = int(sub.iloc[0]['W'])
+                    l = int(sub.iloc[0]['L'])
+                    t = int(sub.iloc[0]['T'])
+                    row_data['tot_w'] += w
+                    row_data['tot_l'] += l
+                    row_data['tot_t'] += t
+                    rec_str = f"{w} - {l}" if t == 0 else f"{w} - {l} - {t}"
+                    is_champ = (champ_by_szn.get(s) == tm)
+                    is_po = (tm in po_teams_by_szn.get(s, set())) or (s not in completed_playoff_seasons and w >= 7)
+                    row_data['cells'][s] = {
+                        'text': rec_str,
+                        'is_po': is_po,
+                        'is_champ': is_champ,
+                        'is_na': False
+                    }
+                else:
+                    row_data['cells'][s] = {
+                        'text': 'n/a',
+                        'is_po': False,
+                        'is_champ': False,
+                        'is_na': True
+                    }
+            gp = row_data['tot_w'] + row_data['tot_l'] + row_data['tot_t']
+            row_data['win_pct'] = (row_data['tot_w'] / gp) if gp > 0 else 0.0
+            row_data['all_time_str'] = f"{row_data['tot_w']} - {row_data['tot_l']}" if row_data['tot_t'] == 0 else f"{row_data['tot_w']} - {row_data['tot_l']} - {row_data['tot_t']}"
+            row_data['pct_str'] = f"{row_data['win_pct']:.3f}".replace("0.", ".", 1) if row_data['win_pct'] < 1 else f"{row_data['win_pct']:.3f}"
+            table_rows.append(row_data)
+
+        # Sort by Win % descending, then by Total Wins descending
+        table_rows = sorted(table_rows, key=lambda x: (x['win_pct'], x['tot_w']), reverse=True)
+
+        # Build styled HTML
+        th_style = "border: 1px solid #111; padding: 6px 10px; font-weight: 700; background-color: #f8f9fa;"
+        header_html = f'<tr><th style="{th_style} text-align: left;">Manager</th>'
+        for s in all_szns:
+            header_html += f'<th style="{th_style}">{s}</th>'
+        header_html += f'<th style="{th_style} border-left: 2px solid #111;">All-Time</th>'
+        header_html += f'<th style="{th_style}">Win %</th></tr>'
+
+        body_html = ""
+        for r in table_rows:
+            body_html += f'<tr><td style="border: 1px solid #111; padding: 6px 12px; font-weight: 600; text-align: left; background-color: #ffffff;">{r["Team"]}</td>'
+            for s in all_szns:
+                cell = r['cells'][s]
+                if cell['is_na']:
+                    bg = "#bfbfbf"
+                    txt = '<span style="font-style: italic; color: #444;">n/a</span>'
+                elif cell['is_champ']:
+                    bg = "#d9ead3"
+                    txt = f'🏆 <b>{cell["text"]}</b>'
+                elif cell['is_po']:
+                    bg = "#d9ead3"
+                    txt = cell['text']
+                else:
+                    bg = "#ffffff"
+                    txt = cell['text']
+                body_html += f'<td style="border: 1px solid #111; padding: 6px 10px; background-color: {bg}; white-space: nowrap;">{txt}</td>'
+            
+            body_html += f'<td style="border: 1px solid #111; border-left: 2px solid #111; padding: 6px 12px; font-weight: 600; background-color: #ffffff; white-space: nowrap;">{r["all_time_str"]}</td>'
+            body_html += f'<td style="border: 1px solid #111; padding: 6px 12px; background-color: #ffffff;">{r["pct_str"]}</td></tr>'
+
+        full_table = f'<table style="width: 100%; border-collapse: collapse; text-align: center; font-size: 14px; margin-top: 10px; border: 2px solid #111;"><thead>{header_html}</thead><tbody>{body_html}</tbody></table>'
+        st.markdown(full_table, unsafe_allow_html=True)
+
+    elif rec_type == "Highest Scoring Weeks":
         df = games[games['Game_Type'].isin([1, 2, 4])].copy()
         df['Points_Num'] = pd.to_numeric(df['Actual_Points'], errors='coerce')
         df = df.sort_values(['Points_Num', 'Season_Num', 'Week_Num'], ascending=[False, False, False]).head(15).reset_index(drop=True)
@@ -1961,4 +2065,3 @@ with tab_player:
             df_nfl[['Rank', 'NFL Team', 'Starts', 'Points', 'Pts / Start', '% of Team Pts', 'Top Contributor']],
             left_align_cols=['NFL Team', 'Top Contributor']
         )
-        
