@@ -146,7 +146,7 @@ def render(box_df=None):
         [
             "📊 Manager Activity Leaderboard",
             "🔥 Most Added & Dropped Players",
-            "💰 FAAB & Contested Waiver Battles",
+            "💰 FAAB & Waiver Wire Battles",
             "🤝 Trade History Log",
             "📜 Full Transaction Search"
         ],
@@ -164,9 +164,12 @@ def render(box_df=None):
     # ================= VIEW 1: MANAGER LEADERBOARD =================
     if tx_view == "📊 Manager Activity Leaderboard":
         sel_szn = st.selectbox("Select Season:", ["All-Time (2019–2026)"] + [str(s) for s in seasons_avail], key="tx_ldr_szn")
-        sub_adds = adds_df if sel_szn.startswith("All-Time") else adds_df[adds_df['Season'] == int(sel_szn)]
-        sub_drops = drops_df if sel_szn.startswith("All-Time") else drops_df[drops_df['Season'] == int(sel_szn)]
-        sub_trades = trades_df if (trades_df.empty or sel_szn.startswith("All-Time")) else trades_df[trades_df['Season'] == int(sel_szn)]
+        is_all_time = sel_szn.startswith("All-Time")
+        show_faab = is_all_time or (int(sel_szn) >= 2026)
+
+        sub_adds = adds_df if is_all_time else adds_df[adds_df['Season'] == int(sel_szn)]
+        sub_drops = drops_df if is_all_time else drops_df[drops_df['Season'] == int(sel_szn)]
+        sub_trades = trades_df if (trades_df.empty or is_all_time) else trades_df[trades_df['Season'] == int(sel_szn)]
 
         rows = []
         for mgr in managers_list:
@@ -174,27 +177,39 @@ def render(box_df=None):
             m_drops = sub_drops[sub_drops['Initiating_Team'] == mgr]
             w_adds = m_adds[m_adds['Type'] == 'WAIVER']
             fa_adds = m_adds[m_adds['Type'] == 'FREEAGENT']
-            faab_spent = w_adds.groupby('Transaction_ID')['Bid_Amount'].first().sum() if not w_adds.empty else 0
-            max_bid = w_adds['Bid_Amount'].max() if not w_adds.empty else 0
+
+            w_faab = w_adds[w_adds['Season'] >= 2026]
+            faab_spent = w_faab.groupby('Transaction_ID')['Bid_Amount'].first().sum() if not w_faab.empty else 0
+            max_bid = w_faab['Bid_Amount'].max() if not w_faab.empty else 0
+
             t_cnt = 0
             if not sub_trades.empty:
                 t_cnt = len(sub_trades[(sub_trades['Manager 1'] == mgr) | (sub_trades['Manager 2'] == mgr)])
 
-            rows.append({
+            row_dict = {
                 'Manager': mgr,
                 'Total Adds': len(m_adds),
                 'FA Pickups': len(fa_adds),
                 'Waiver Claims': len(w_adds),
                 'Total Drops': len(m_drops),
                 'Trades Completed': t_cnt,
-                'FAAB Spent': f"${int(faab_spent)}",
-                'Max Bid': f"${int(max_bid)}"
-            })
+            }
+            if show_faab:
+                faab_col_lbl = 'FAAB Spent (2026+)' if is_all_time else 'FAAB Spent'
+                max_col_lbl = 'Max Bid (2026+)' if is_all_time else 'Max Bid'
+                row_dict[faab_col_lbl] = f"${int(faab_spent)}"
+                row_dict[max_col_lbl] = f"${int(max_bid)}"
+
+            rows.append(row_dict)
 
         ldr_df = pd.DataFrame(rows).sort_values('Total Adds', ascending=False).reset_index(drop=True)
         ldr_df['Rank'] = ldr_df.index + 1
-        cols = ['Rank', 'Manager', 'Total Adds', 'FA Pickups', 'Waiver Claims', 'Total Drops', 'Trades Completed', 'FAAB Spent', 'Max Bid']
-        render_table(ldr_df[cols])
+        base_cols = ['Rank', 'Manager', 'Total Adds', 'FA Pickups', 'Waiver Claims', 'Total Drops', 'Trades Completed']
+        if show_faab:
+            faab_col_lbl = 'FAAB Spent (2026+)' if is_all_time else 'FAAB Spent'
+            max_col_lbl = 'Max Bid (2026+)' if is_all_time else 'Max Bid'
+            base_cols += [faab_col_lbl, max_col_lbl]
+        render_table(ldr_df[base_cols])
 
     # ================= VIEW 2: MOST ADDED & DROPPED PLAYERS =================
     elif tx_view == "🔥 Most Added & Dropped Players":
@@ -225,41 +240,93 @@ def render(box_df=None):
         pop = pop.rename(columns={'Position': 'Pos', 'Count': lbl_cnt, 'Unique_Managers': 'Unique Managers', 'Managers': 'Managers Involved'})
         render_table(pop[['Rank', 'Player', 'Pos', lbl_cnt, 'Unique Managers', 'Managers Involved']], left_align_cols=['Player', 'Managers Involved'])
 
-    # ================= VIEW 3: FAAB & WAIVER BATTLES =================
-    elif tx_view == "💰 FAAB & Contested Waiver Battles":
-        mode = st.radio("Select View:", ["Largest Winning FAAB Bids", "Contested Waiver Battles (Outbid Log)"], horizontal=True, key="tx_faab_mode")
-        if mode == "Largest Winning FAAB Bids":
-            st.write("#### Largest Winning Waiver FAAB Bids")
-            w_wins = adds_df[adds_df['Type'] == 'WAIVER'].sort_values(['Bid_Amount', 'Season', 'Week'], ascending=[False, False, False]).head(25).reset_index(drop=True)
-            w_wins['Rank'] = w_wins.index + 1
-            w_wins['Bid'] = w_wins['Bid_Amount'].apply(lambda x: f"${int(x)}")
-            disp = w_wins[['Rank', 'Season', 'Week', 'To_Team', 'Player', 'Position', 'Bid', 'Date']].rename(columns={'To_Team': 'Manager', 'Position': 'Pos'})
-            render_table(disp, left_align_cols=['Player'])
-        else:
-            st.write("#### Contested Waiver Battles (Multiple Managers Bidding on the Same Player)")
-            w_all = df[(df['Type'] == 'WAIVER') & (df['Action'] == 'ADD') & (df['Status'].isin(['EXECUTED', 'FAILED_INVALIDPLAYERSOURCE']))].copy()
-            battles = []
-            for (szn, wk, pl), grp in w_all.groupby(['Season', 'Week', 'Player']):
+    # ================= VIEW 3: FAAB & WAIVER WIRE BATTLES =================
+    elif tx_view == "💰 FAAB & Waiver Wire Battles":
+        mode = st.radio(
+            "Select Waiver View:",
+            [
+                "FAAB Bidding Wars (2026+)",
+                "Largest Winning FAAB Bids (2026+)",
+                "Priority Waiver Fights (2019–2025)"
+            ],
+            horizontal=True,
+            key="tx_faab_mode"
+        )
+
+        if mode == "FAAB Bidding Wars (2026+)":
+            st.write("#### 2026+ Contested FAAB Bidding Wars (Multiple Managers Bidding on the Same Player)")
+            w_2026 = df[(df['Season'] >= 2026) & (df['Type'] == 'WAIVER') & (df['Action'] == 'ADD') & (df['Status'].isin(['EXECUTED', 'FAILED_INVALIDPLAYERSOURCE']))].copy()
+            w_2026_dedup = w_2026.sort_values(['Status', 'Bid_Amount'], ascending=[True, False]).drop_duplicates(subset=['Season', 'Week', 'Player', 'To_Team'])
+
+            faab_wars = []
+            for (szn, wk, pl), grp in w_2026_dedup.groupby(['Season', 'Week', 'Player']):
                 if len(grp) > 1 and ('EXECUTED' in grp['Status'].values):
                     win_row = grp[grp['Status'] == 'EXECUTED'].iloc[0]
-                    losers = grp[grp['Status'] != 'EXECUTED'].sort_values('Bid_Amount', ascending=False)
-                    loser_strs = [f"{r['To_Team']} (${int(r['Bid_Amount'])})" for _, r in losers.iterrows()]
-                    battles.append({
-                        'Season': szn,
-                        'Week': wk,
-                        'Player': pl,
-                        'Pos': win_row['Position'],
-                        'Winner': win_row['To_Team'],
-                        'Winning_Bid_Num': int(win_row['Bid_Amount']),
-                        'Winning Bid': f"${int(win_row['Bid_Amount'])}",
-                        'Total Claims': len(grp),
-                        'Outbid Managers': ", ".join(loser_strs)
-                    })
-            if battles:
-                b_df = pd.DataFrame(battles).sort_values(['Season', 'Winning_Bid_Num', 'Total Claims'], ascending=[False, False, False]).reset_index(drop=True)
-                render_table(b_df[['Season', 'Week', 'Player', 'Pos', 'Winner', 'Winning Bid', 'Total Claims', 'Outbid Managers']], left_align_cols=['Player', 'Outbid Managers'])
+                    losers = grp[(grp['Status'] != 'EXECUTED') & (grp['To_Team'] != win_row['To_Team'])].sort_values('Bid_Amount', ascending=False)
+                    if not losers.empty:
+                        loser_strs = [f"{r['To_Team']} (${int(r['Bid_Amount'])})" for _, r in losers.iterrows()]
+                        faab_wars.append({
+                            'Season': szn,
+                            'Week': wk,
+                            'Player': pl,
+                            'Pos': win_row['Position'],
+                            'Winner': win_row['To_Team'],
+                            'Winning_Bid_Num': int(win_row['Bid_Amount']),
+                            'Winning Bid': f"${int(win_row['Bid_Amount'])}",
+                            'Bidders': 1 + len(losers),
+                            'Outbid Managers': ", ".join(loser_strs)
+                        })
+            if faab_wars:
+                fw_df = pd.DataFrame(faab_wars).sort_values(['Season', 'Winning_Bid_Num', 'Bidders'], ascending=[False, False, False]).reset_index(drop=True)
+                render_table(fw_df[['Season', 'Week', 'Player', 'Pos', 'Winner', 'Winning Bid', 'Bidders', 'Outbid Managers']], left_align_cols=['Player', 'Outbid Managers'])
             else:
-                st.info("No contested waiver battles found.")
+                st.info("No contested FAAB bidding wars found.")
+
+        elif mode == "Largest Winning FAAB Bids (2026+)":
+            st.write("#### Largest Winning FAAB Bids (2026+)")
+            w_wins = adds_df[(adds_df['Type'] == 'WAIVER') & (adds_df['Season'] >= 2026)].sort_values(['Bid_Amount', 'Season', 'Week'], ascending=[False, False, False]).head(25).reset_index(drop=True)
+            if not w_wins.empty:
+                w_wins['Rank'] = w_wins.index + 1
+                w_wins['Bid'] = w_wins['Bid_Amount'].apply(lambda x: f"${int(x)}")
+                disp = w_wins[['Rank', 'Season', 'Week', 'To_Team', 'Player', 'Position', 'Bid', 'Date']].rename(columns={'To_Team': 'Manager', 'Position': 'Pos'})
+                render_table(disp, left_align_cols=['Player'])
+            else:
+                st.info("No FAAB bids recorded.")
+
+        elif mode == "Priority Waiver Fights (2019–2025)":
+            st.write("#### Pre-FAAB Priority Waiver Fights (2019–2025)")
+            st.caption("Weeks where multiple managers submitted a waiver claim for the same player and the manager with higher waiver priority won the claim.")
+            pre_szns = sorted([s for s in seasons_avail if s <= 2025], reverse=True)
+            sel_pre_szn = st.selectbox("Filter Season:", ["All Pre-FAAB Seasons (2019–2025)"] + [str(s) for s in pre_szns], key="tx_pre_waiv_szn")
+
+            w_pre = df[(df['Season'] <= 2025) & (df['Type'] == 'WAIVER') & (df['Action'] == 'ADD') & (df['Status'].isin(['EXECUTED', 'FAILED_INVALIDPLAYERSOURCE']))].copy()
+            if not sel_pre_szn.startswith("All"):
+                w_pre = w_pre[w_pre['Season'] == int(sel_pre_szn)]
+
+            w_pre_dedup = w_pre.sort_values('Status').drop_duplicates(subset=['Season', 'Week', 'Player', 'To_Team'])
+            fights = []
+            for (szn, wk, pl), grp in w_pre_dedup.groupby(['Season', 'Week', 'Player']):
+                if len(grp) > 1 and ('EXECUTED' in grp['Status'].values):
+                    win_row = grp[grp['Status'] == 'EXECUTED'].iloc[0]
+                    losers = [m for m in grp[grp['Status'] != 'EXECUTED']['To_Team'].tolist() if m != win_row['To_Team']]
+                    if losers:
+                        fights.append({
+                            'Season': szn,
+                            'Week': wk,
+                            'Player': pl,
+                            'Pos': win_row['Position'],
+                            'Priority Winner': win_row['To_Team'],
+                            'Total Claimants': 1 + len(losers),
+                            'Denied Claimants (Lower Priority)': ", ".join(losers)
+                        })
+            if fights:
+                f_df = pd.DataFrame(fights).sort_values(['Total Claimants', 'Season', 'Week'], ascending=[False, False, False]).reset_index(drop=True)
+                render_table(
+                    f_df[['Season', 'Week', 'Player', 'Pos', 'Priority Winner', 'Total Claimants', 'Denied Claimants (Lower Priority)']],
+                    left_align_cols=['Player', 'Denied Claimants (Lower Priority)']
+                )
+            else:
+                st.info("No contested priority waiver claims found for the selected filter.")
 
     # ================= VIEW 4: TRADE HISTORY LOG =================
     elif tx_view == "🤝 Trade History Log":
@@ -297,8 +364,12 @@ def render(box_df=None):
         if s_player.strip():
             sub = sub[sub['Player'].str.contains(s_player.strip(), case=False, na=False)]
 
-        sub['Bid'] = sub.apply(lambda r: f"${int(r['Bid_Amount'])}" if r['Type'] == 'WAIVER' and r['Action'] == 'ADD' else "-", axis=1)
-        disp = sub[['Season', 'Week', 'Date', 'Initiating_Team', 'Type', 'Action', 'Player', 'Position', 'From_Team', 'To_Team', 'Bid']].head(200).rename(
+        sub['FAAB Bid'] = sub.apply(
+            lambda r: f"${int(r['Bid_Amount'])}" if (int(r['Season']) >= 2026 and r['Type'] == 'WAIVER' and r['Action'] == 'ADD') else "-",
+            axis=1
+        )
+        disp = sub[['Season', 'Week', 'Date', 'Initiating_Team', 'Type', 'Action', 'Player', 'Position', 'From_Team', 'To_Team', 'FAAB Bid']].head(200).rename(
             columns={'Initiating_Team': 'Manager', 'Position': 'Pos', 'From_Team': 'From', 'To_Team': 'To'}
         )
         render_table(disp, left_align_cols=['Player'])
+        
