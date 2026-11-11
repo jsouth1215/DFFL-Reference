@@ -1268,7 +1268,7 @@ with tab4:
                     row_data['tot_t'] += t
                     rec_str = f"{w} - {l}" if t == 0 else f"{w} - {l} - {t}"
                     is_champ = (champ_by_szn.get(s) == tm)
-is_po = (tm in po_teams_by_szn.get(s, set()))
+                    is_po = (tm in po_teams_by_szn.get(s, set()))
                     row_data['cells'][s] = {
                         'text': rec_str,
                         'is_po': is_po,
