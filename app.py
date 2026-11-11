@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import draft_tab
 
 st.set_page_config(page_title="DFFL Hub", page_icon="🏈", layout="wide")
 
@@ -729,8 +730,8 @@ completed_playoff_seasons = set(
 rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
 
 # ================= TAB DECLARATIONS =================
-tab1, tab5, tab6, tab2, tab3, tab4, tab_player = st.tabs([
-    "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Detailed Player Scoring"
+tab1, tab5, tab6, tab2, tab3, tab4, tab_draft, tab_player = st.tabs([
+    "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Draft", "Detailed Player Scoring"
 ])
 
 # ================= TAB 1: FRANCHISE =================
@@ -2065,3 +2066,6 @@ with tab_player:
             df_nfl[['Rank', 'NFL Team', 'Starts', 'Points', 'Pts / Start', '% of Team Pts', 'Top Contributor']],
             left_align_cols=['NFL Team', 'Top Contributor']
         )
+        # ================= TAB 8: DRAFT =================
+with tab_draft:
+    draft_tab.render(box_df)
