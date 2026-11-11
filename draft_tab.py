@@ -20,7 +20,6 @@ NFL_DRAFT_NORM = {
     'SF': 'SF',   'TB': 'TB'
 }
 
-# Explicit corrections for players back-dated by ESPN to later free agency or mid-season trades
 DRAFT_DAY_OVERRIDES = {
     (2023, 'Austin Ekeler'): 'LAC',
     (2023, 'Saquon Barkley'): 'NYG',
@@ -120,7 +119,6 @@ def load_draft_data(box_df=None):
     df['NFL_Raw'] = df['NFL Team'].astype(str).str.strip()
     df['NFL Team'] = df['NFL_Raw'].map(NFL_DRAFT_NORM).fillna(df['NFL_Raw'].str.upper())
 
-    # Cross-check Week 1 box_df for actual Week 1 NFL team if available
     wk1_lookup = {}
     if box_df is not None and not box_df.empty:
         name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
@@ -165,7 +163,6 @@ def render(box_df=None):
     years_avail = sorted(df['Year'].unique().tolist(), reverse=True)
     managers_avail = sorted(df['Team'].unique().tolist())
 
-    # ================= VIEW 1: YEARLY DRAFT BOARD =================
     if draft_view == "🏈 Yearly Draft Board":
         c1, c2 = st.columns([1.5, 4])
         with c1:
@@ -229,7 +226,6 @@ def render(box_df=None):
         )
         st.markdown(board_html, unsafe_allow_html=True)
 
-    # ================= VIEW 2: PLAYER DRAFT LEDGER =================
     elif draft_view == "📋 Player Draft Ledger":
         all_players = sorted(df['Player'].unique().tolist())
         default_idx = all_players.index("Christian McCaffrey") if "Christian McCaffrey" in all_players else 0
@@ -255,7 +251,6 @@ def render(box_df=None):
             )
             render_table(disp)
 
-    # ================= VIEW 3: MANAGER DRAFT ROOM =================
     elif draft_view == "👤 Manager Draft Room":
         c1, c2 = st.columns(2)
         sel_mgr = c1.selectbox("Select Manager:", managers_avail, key="mdr_mgr")
@@ -304,7 +299,6 @@ def render(box_df=None):
             )
             render_table(yr_sub, left_align_cols=['Player'])
 
-    # ================= VIEW 4: DRAFT RECORDS & LOYALTY =================
     elif draft_view == "🏆 Draft Records & Loyalty":
         rec_mode = st.radio(
             "Select Draft Record:",
@@ -338,7 +332,7 @@ def render(box_df=None):
 
         elif rec_mode == "Most Drafted Players (League-Wide)":
             st.write("#### Most Frequently Drafted Players Across All Managers (7+ Times)")
-             pop = df.groupby('Player').agg(
+            pop = df.groupby('Player').agg(
                 Pos=('Position', lambda s: s.mode().iloc[0] if not s.mode().empty else ''),
                 Times_Drafted=('Year', 'count'),
                 Unique_Managers=('Team', 'nunique'),
@@ -346,7 +340,7 @@ def render(box_df=None):
                 Best_Pick=('Overall Pick', 'min'),
                 Drafted_By=('Team', lambda s: ", ".join(f"{k} ({v}x)" if v > 1 else k for k, v in s.value_counts().items()))
             ).reset_index()
-            pop = pop[pop['Position'] != 'D/ST']
+            pop = pop[pop['Pos'] != 'D/ST']
             pop = pop[pop['Times_Drafted'] >= 7].sort_values(['Times_Drafted', 'Avg_Pick'], ascending=[False, True]).reset_index(drop=True)
             pop['ADP'] = pop['Avg_Pick'].apply(lambda x: f"{x:.1f}")
             pop['Highest Pick'] = pop['Best_Pick'].apply(lambda x: f"#{int(x)}")
@@ -384,4 +378,4 @@ def render(box_df=None):
                 piv[y] = piv[y].apply(lambda v: f"#{int(v)}" if pd.notnull(v) else "-")
             piv_disp = piv.reset_index().rename(columns={'Team': 'Manager'})[['Manager'] + yr_cols + ['Avg Slot', '#1 Picks']]
             render_table(piv_disp)
-          
+            
