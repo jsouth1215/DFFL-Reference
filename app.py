@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import draft_tab
+import transactions_tab
 
 st.set_page_config(page_title="DFFL Hub", page_icon="🏈", layout="wide")
 
