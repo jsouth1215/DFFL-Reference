@@ -165,7 +165,14 @@ def render(box_df=None):
         st.warning("Could not load 'Draft History.xlsx' (sheet: 'Consolidated'). Make sure it is uploaded to the repository root.")
         return
 
-    dva_df = value_engine.compute_draft_value_added(df, box_df)
+    trades_df = pd.DataFrame()
+    try:
+        import transactions_tab
+        _, trades_df = transactions_tab.load_transactions_data(box_df)
+    except Exception:
+        pass
+
+    dva_df = value_engine.compute_draft_value_added(df, box_df, trades_df)
 
     draft_view = st.radio(
         "Draft View:",
@@ -247,11 +254,10 @@ def render(box_df=None):
         )
         st.markdown(board_html, unsafe_allow_html=True)
 
-    elif draft_view == "Draft Value Added (DVA)":
+   elif draft_view == "Draft Value Added (DVA)":
         st.caption(
-            "**Draft Value Added (DVA)** measures the actual points a drafted player generates in a starting lineup above a waiver-level replacement at their position "
-            "(minus a -0.5 pt/wk bench clog penalty for healthy bench stashes), minus the expected return of that draft slot. "
-            "**Pick DVA** grades the pick across the full season (scouting accuracy even if traded); **Manager DVA** grades the value produced on the drafting manager's roster (prorated for weeks held)."
+            "**Pick DVA** grades the draft pick across the full season regardless of who owned the player later. "
+            "**Trade-Adj DVA** grades the full-season return realized by the drafting manager (pre-trade starts + allocated post-trade value of players acquired in return, minus the pick's slot hurdle)."
         )
         if dva_df.empty:
             st.info("Box score data is required to compute Draft Value Added.")
@@ -262,10 +268,11 @@ def render(box_df=None):
             [
                 "Biggest Draft Steals (Top Pick DVA)",
                 "Biggest Draft Busts (Lowest Pick DVA)",
+                "Best Trade-Adjusted Draft Picks (Top Trade-Adj DVA)",
                 "Manager Draft Value Leaderboard"
             ],
             horizontal=True,
-            key="dva_mode_sel"
+            key="dva_mode_sel_v5"
         )
 
         c1, c2, c3 = st.columns(3)
@@ -283,16 +290,21 @@ def render(box_df=None):
         if sel_mgr != "All Managers":
             sub = sub[sub['Team'] == sel_mgr]
 
-        if dva_mode in ["Biggest Draft Steals (Top Pick DVA)", "Biggest Draft Busts (Lowest Pick DVA)"]:
+        if dva_mode in [
+            "Biggest Draft Steals (Top Pick DVA)",
+            "Biggest Draft Busts (Lowest Pick DVA)",
+            "Best Trade-Adjusted Draft Picks (Top Trade-Adj DVA)"
+        ]:
+            sort_col = 'Trade_Adj_DVA' if "Trade-Adjusted" in dva_mode else 'Pick_DVA'
             asc = (dva_mode == "Biggest Draft Busts (Lowest Pick DVA)")
-            ranked = sub.sort_values('Pick_DVA', ascending=asc).head(30).reset_index(drop=True)
+            ranked = sub.sort_values(sort_col, ascending=asc).head(30).reset_index(drop=True)
             ranked['Rank'] = ranked.index + 1
             ranked['Starts'] = ranked['Total_Starts'].astype(int)
             ranked['Pts / Start'] = ranked['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
             ranked['Slot Hurdle'] = ranked['Expected_Val'].apply(lambda x: f"{x:.1f}")
             ranked['Pick DVA'] = ranked['Pick_DVA'].apply(fmt_signed)
-            ranked['Manager DVA'] = ranked['Manager_DVA'].apply(fmt_signed)
-            disp = ranked[['Rank', 'Year', 'Round', 'Overall Pick', 'Team', 'Player', 'Position', 'Starts', 'Pts / Start', 'Pos_Rank', 'Slot Hurdle', 'Pick DVA', 'Manager DVA']].rename(
+            ranked['Trade-Adj DVA'] = ranked['Trade_Adj_DVA'].apply(fmt_signed)
+            disp = ranked[['Rank', 'Year', 'Round', 'Overall Pick', 'Team', 'Player', 'Position', 'Starts', 'Pts / Start', 'Pos_Rank', 'Slot Hurdle', 'Pick DVA', 'Trade-Adj DVA']].rename(
                 columns={'Overall Pick': 'Pick #', 'Team': 'Drafted By', 'Position': 'Pos', 'Pos_Rank': 'Pos Rank'}
             )
             render_table(disp, left_align_cols=['Player'])
@@ -304,7 +316,7 @@ def render(box_df=None):
                 if m_sub.empty:
                     continue
                 tot_pick_dva = m_sub['Pick_DVA'].sum()
-                tot_mgr_dva = m_sub['Manager_DVA'].sum()
+                tot_tr_dva = m_sub['Trade_Adj_DVA'].sum()
                 avg_pick_dva = m_sub['Pick_DVA'].mean()
                 hit_rate = (m_sub['Pick_DVA'] > 0).mean() * 100.0
                 best_row = m_sub.loc[m_sub['Pick_DVA'].idxmax()]
@@ -313,16 +325,16 @@ def render(box_df=None):
                     'Manager': mgr,
                     'Picks': len(m_sub),
                     'Pick_DVA_Num': tot_pick_dva,
-                    'Total Pick DVA (Scouting)': fmt_signed(tot_pick_dva),
-                    'Realized Manager DVA': fmt_signed(tot_mgr_dva),
-                    'Avg DVA / Pick': fmt_signed(avg_pick_dva),
+                    'Total Pick DVA': fmt_signed(tot_pick_dva),
+                    'Total Trade-Adj DVA': fmt_signed(tot_tr_dva),
+                    'Avg Pick DVA': fmt_signed(avg_pick_dva),
                     'Hit Rate (>0 DVA)': f"{hit_rate:.1f}%",
                     'Best Pick': f"{best_row['Player']} ({int(best_row['Year'])} Rd {int(best_row['Round'])}, {fmt_signed(best_row['Pick_DVA'])})",
                     'Worst Bust': f"{worst_row['Player']} ({int(worst_row['Year'])} Rd {int(worst_row['Round'])}, {fmt_signed(worst_row['Pick_DVA'])})"
                 })
             m_df = pd.DataFrame(mgr_rows).sort_values('Pick_DVA_Num', ascending=False).reset_index(drop=True)
             m_df['Rank'] = m_df.index + 1
-            cols = ['Rank', 'Manager', 'Picks', 'Total Pick DVA (Scouting)', 'Realized Manager DVA', 'Avg DVA / Pick', 'Hit Rate (>0 DVA)', 'Best Pick', 'Worst Bust']
+            cols = ['Rank', 'Manager', 'Picks', 'Total Pick DVA', 'Total Trade-Adj DVA', 'Avg Pick DVA', 'Hit Rate (>0 DVA)', 'Best Pick', 'Worst Bust']
             render_table(m_df[cols], left_align_cols=['Best Pick', 'Worst Bust'])
 
     elif draft_view == "Player Draft Ledger":
