@@ -175,6 +175,17 @@ def render(box_df=None):
         pass
 
     dva_df = value_engine.compute_draft_value_added(df, box_df, trades_df)
+    trades_df = pd.DataFrame()
+    try:
+        import transactions_tab
+        importlib.reload(transactions_tab)
+        _, trades_df = transactions_tab.load_transactions_data(box_df)
+    except Exception:
+        pass
+
+    dva_df = value_engine.compute_draft_value_added(df, box_df, trades_df)
+    if not dva_df.empty and 'Trade_Adj_DVA' not in dva_df.columns and 'Trade_Adj_DVA' in dva_df.columns:
+        dva_df['Trade_Adj_DVA'] = dva_df['Trade_Adj_DVA']
 
     draft_view = st.radio(
         "Draft View:",
@@ -428,8 +439,8 @@ def render(box_df=None):
                 yr_sub['Starts'] = yr_sub['Total_Starts'].astype(int)
                 yr_sub['Pts / Start'] = yr_sub['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
                 yr_sub['Pick DVA'] = yr_sub['Pick_DVA'].apply(fmt_signed)
-                yr_sub['Manager DVA'] = yr_sub['Manager_DVA'].apply(fmt_signed)
-                yr_disp = yr_sub[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Starts', 'Pts / Start', 'Pos_Rank', 'Pick DVA', 'Manager DVA']].rename(
+                yr_sub['Trade-Adj DVA'] = yr_sub['Trade_Adj_DVA'].apply(fmt_signed)
+                yr_disp = yr_sub[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Starts', 'Pts / Start', 'Pos_Rank', 'Pick DVA', 'Trade-Adj DVA']].rename(
                     columns={'Round Pick': 'Pick in Rd', 'Overall Pick': 'Overall #', 'Pos_Rank': 'Pos Rank'}
                 )
             else:
