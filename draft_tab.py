@@ -188,12 +188,11 @@ def render(box_df=None):
         [
             "Yearly Draft Board",
             "Draft Value Added (DVA)",
-            "Player Draft Ledger",
             "Manager Draft Room",
             "Draft Records & Loyalty"
         ],
         horizontal=True,
-        key="draft_sub_view_v7"
+        key="draft_sub_view_v8"
     )
     st.write("---")
 
