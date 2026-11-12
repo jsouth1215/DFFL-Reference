@@ -149,15 +149,128 @@ def get_unstarted_defenses(dst_df, name_col):
 @st.cache_data(ttl=600)
 def load_box_scores():
     dfs = []
-    for fname, sname in [
-        ("espn_fantasy_complete_stats_2017_2026.xlsx", "Box_Scores"),
-        ("reconstructed_2018_box_scores.xlsx", "Box_Scores_2018")
-    ]:
-        try:
-            dfs.append(pd.read_excel(fname, sheet_name=sname, engine="openpyxl"))
-        except Exception:
-            pass
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    try:
+        df_main = pd.read_excel("espn_fantasy_complete_stats_2017_2026.xlsx", sheet_name="Box_Scores", engine="openpyxl")
+        dfs.append(df_main)
+    except Exception:
+        pass
+
+    try:
+        df_18 = pd.read_excel("reconstructed_2018_box_scores.xlsx", sheet_name="Box_Scores_2018", engine="openpyxl")
+        if not df_18.empty:
+            if dfs:
+                s_str = dfs[0]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                dfs[0] = dfs[0][s_str != '2018'].copy()
+            dfs.append(df_18)
+    except Exception:
+        pass
+
+    if not dfs:
+        return pd.DataFrame()
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    # 1. Coalesce text columns across both files
+    def coalesce_text(target, candidates):
+        cols = [c for c in candidates if c in df.columns]
+        if not cols:
+            return
+        res = pd.Series(index=df.index, dtype=object)
+        for c in cols:
+            s = df[c].dropna().astype(str).str.strip()
+            s = s[~s.isin(['', 'nan', 'None', 'NaN'])]
+            res = res.combine_first(s)
+        df[target] = res.fillna('')
+
+    coalesce_text('Player_Name', ['Player_Name', 'Player'])
+    coalesce_text('Slot', ['Slot', 'Lineup_Slot'])
+    coalesce_text('Position', ['Position', 'Pos'])
+    coalesce_text('Pro_Team', ['Pro_Team', 'NFL_Team', 'ProTeam', 'NFL', 'Team_Abbrev', 'Team_Abbr', 'Pro_Team_Abbrev', 'Pro Team', 'NFL Team', 'Player_Team'])
+
+    # Fill 2018 undrafted waiver-pickup NFL teams & normalize 3-letter codes
+    nfl_2018_patch = {
+        '49ers D/ST': 'SF', 'Adam Humphries': 'TB', 'Albert Wilson': 'MIA', 'Aldrick Rosas': 'NYG',
+        'Alfred Blue': 'HOU', 'Alfred Morris': 'SF', 'Andy Dalton': 'CIN', 'Antonio Callaway': 'CLE',
+        'Antonio Gates': 'LAC', 'Austin Ekeler': 'LAC', 'Austin Seferian-Jenkins': 'JAX', 'Baker Mayfield': 'CLE',
+        'Bears D/ST': 'CHI', 'Bengals D/ST': 'CIN', 'Bills D/ST': 'BUF', 'Blake Bortles': 'JAX',
+        'Brandon Marshall': 'SEA', 'Brett Maher': 'DAL', 'Browns D/ST': 'CLE', 'Bruce Ellington': 'HOU',
+        'Buccaneers D/ST': 'TB', 'C.J. Uzomah': 'CIN', 'Cairo Santos': 'TB', 'Cameron Brate': 'TB',
+        'Chester Rogers': 'IND', 'Chiefs D/ST': 'KC', 'Chris Herndon': 'NYJ', 'Chris Ivory': 'BUF',
+        'Christian Kirk': 'ARI', 'Cody Parkey': 'CHI', 'Colts D/ST': 'IND', 'Corey Clement': 'PHI',
+        'Cowboys D/ST': 'DAL', 'Curtis Samuel': 'CAR', "D'Onta Foreman": 'HOU', 'Damien Williams': 'KC',
+        'Dan Bailey': 'MIN', 'Dante Pettis': 'SF', 'David Moore': 'SEA', 'Dede Westbrook': 'JAX',
+        'Dolphins D/ST': 'MIA', 'Donte Moncrief': 'JAX', 'Dustin Hopkins': 'WAS', 'Dwayne Allen': 'NE',
+        'Elijah McGuire': 'NYJ', 'Eric Ebron': 'IND', 'Falcons D/ST': 'ATL', 'Frank Gore': 'MIA',
+        'George Kittle': 'SF', 'Gerald Everett': 'LAR', 'Giants D/ST': 'NYG', 'Gus Edwards': 'BAL',
+        'Ian Thomas': 'CAR', 'Ito Smith': 'ATL', 'Jalen Richard': 'LV', 'Jamaal Charles': 'JAX',
+        'Jameis Winston': 'TB', 'James Conner': 'PIT', 'Jared Cook': 'LV', 'Jason Myers': 'NYJ',
+        'Jaylen Samuels': 'PIT', 'Jeff Heuerman': 'DEN', 'Jeff Wilson Jr.': 'SF', 'Jermaine Kearse': 'NYJ',
+        'Jets D/ST': 'NYJ', 'Johnny Manziel': 'FA', 'Jonnu Smith': 'TEN', 'Josh Adams': 'PHI',
+        'Josh Allen': 'BUF', 'Josh Lambo': 'JAX', 'Josh Reynolds': 'LAR', 'Justin Jackson': 'LAC',
+        "Ka'imi Fairbairn": 'HOU', 'Keke Coutee': 'HOU', 'Kenjon Barner': 'NE', 'Kyle Juszczyk': 'SF',
+        'Lamar Jackson': 'BAL', 'Malcolm Brown': 'LAR', 'Marquez Valdes-Scantling': 'GB', 'Mason Crosby': 'GB',
+        'Matt Breida': 'SF', 'Mike Davis': 'SEA', 'Mitchell Trubisky': 'CHI', 'Nick Chubb': 'CLE',
+        'Nick Foles': 'PHI', 'Packers D/ST': 'GB', 'Phillip Dorsett': 'NE', 'Phillip Lindsay': 'DEN',
+        'Raheem Mostert': 'SF', 'Randy Bullock': 'CIN', 'Redskins D/ST': 'WAS', 'Rhett Ellison': 'NYG',
+        'Ricky Seals-Jones': 'ARI', 'Ryan Fitzpatrick': 'TB', 'Ryan Grant': 'IND', 'Ryan Succop': 'TEN',
+        'Sam Ficken': 'LAR', 'Seahawks D/ST': 'SEA', 'Steelers D/ST': 'PIT', 'Stevan Ridley': 'PIT',
+        'T.J. Yeldon': 'JAX', 'Taylor Gabriel': 'CHI', 'Taywan Taylor': 'TEN', "Tre'Quan Smith": 'NO',
+        'Trenton Cannon': 'NYJ', 'Tyler Boyd': 'CIN', 'Tyrell Williams': 'LAC', 'Vance McDonald': 'PIT',
+        'Wendell Smallwood': 'PHI', 'Will Dissly': 'SEA', 'Willie Snead IV': 'BAL', 'Zach Zenner': 'DET'
+    }
+    nfl_norm_map = {'GBP': 'GB', 'KCC': 'KC', 'NOL': 'NO', 'NEP': 'NE', 'SF9': 'SF', 'TBB': 'TB', 'LVR': 'LV', 'WSH': 'WAS'}
+
+    if 'Pro_Team' in df.columns and 'Player_Name' in df.columns:
+        df['Pro_Team'] = df.apply(
+            lambda r: nfl_2018_patch.get(str(r['Player_Name']).strip(), '') if not str(r['Pro_Team']).strip() else str(r['Pro_Team']).strip(),
+            axis=1
+        )
+        df['Pro_Team'] = df['Pro_Team'].map(lambda x: nfl_norm_map.get(x.upper(), x.upper()) if x else '')
+        df['NFL_Team'] = df['Pro_Team']
+
+    # 2. Coalesce numeric stat columns across all naming conventions
+    stat_specs = [
+        ('Actual_Points', ['Actual_Points', 'Points'], [], []),
+        ('Passing_Yards', ['Passing_Yards', 'Pass_Yds', 'Pass_Yards', 'Passing_Yds', 'Passing Yards', 'Pass Yds'], ['pass', 'yd'], []),
+        ('Passing_TDs', ['Passing_TDs', 'Pass_TD', 'Pass_TDs', 'Passing_Touchdowns', 'Passing TDs', 'Pass TD', 'Passing_TD'], ['pass', 'td'], ['rush', 'rec', 'def']),
+        ('Passing_Interceptions', ['Passing_Interceptions', 'Passing_Int', 'Pass_Int', 'Interceptions', 'INT', 'Pass INT', 'Pass_INT'], ['int'], ['def']),
+        ('Rushing_Yards', ['Rushing_Yards', 'Rush_Yds', 'Rush_Yards', 'Rushing_Yds', 'Rushing Yards', 'Rush Yds'], ['rush', 'yd'], []),
+        ('Rushing_TDs', ['Rushing_TDs', 'Rush_TD', 'Rush_TDs', 'Rushing_Touchdowns', 'Rushing TDs', 'Rush TD', 'Rushing_TD'], ['rush', 'td'], ['pass', 'rec', 'def']),
+        ('Receptions', ['Receptions', 'Rec', 'Catches'], ['rec'], ['yard', 'yd', 'td', 'pass', 'rush', 'def', 'fum', 'int']),
+        ('Receiving_Yards', ['Receiving_Yards', 'Rec_Yds', 'Rec_Yards', 'Receiving_Yds', 'Receiving Yards', 'Rec Yds'], ['rec', 'yd'], ['pass', 'rush']),
+        ('Receiving_TDs', ['Receiving_TDs', 'Rec_TD', 'Rec_TDs', 'Receiving_Touchdowns', 'Receiving TDs', 'Rec TD', 'Receiving_TD'], ['rec', 'td'], ['pass', 'rush', 'def', 'int', 'fum']),
+        ('FGM', ['FGM', 'Field_Goals_Made', 'FG_Made', 'FG'], ['fg'], ['miss', 'att']),
+        ('XPM', ['XPM', 'Extra_Points_Made', 'XP_Made', 'XP', 'PAT'], ['xp'], ['miss', 'att']),
+        ('Sacks', ['Sacks', 'Sack', 'Def_Sacks', 'Defensive_Sacks'], ['sack'], []),
+        ('Def_INT', ['Def_INT', 'Defensive_Interceptions', 'Defensive_Int', 'Def_Interceptions'], ['def', 'int'], []),
+        ('Fumbles_Recovered', ['Fumbles_Recovered', 'FR', 'Fum_Rec', 'Def_FR'], ['fum', 'rec'], []),
+        ('Def_TD', ['Def_TD', 'Defensive_TDs', 'Def_TDs', 'Defensive_TD'], ['def', 'td'], [])
+    ]
+
+    for target_col, exact_list, kws, excl in stat_specs:
+        matched_cols = []
+        for cand in exact_list:
+            cn = cand.lower().replace('_', '').replace(' ', '').replace('/', '').replace('-', '').strip()
+            for c in df.columns:
+                c_norm = str(c).lower().replace('_', '').replace(' ', '').replace('/', '').replace('-', '').strip()
+                if c_norm == cn and c not in matched_cols:
+                    matched_cols.append(c)
+        if kws:
+            for c in df.columns:
+                c_str = str(c).lower().replace(' ', '_')
+                if all(k in c_str for k in kws):
+                    if excl and any(ex in c_str for ex in excl):
+                        continue
+                    if c not in matched_cols:
+                        matched_cols.append(c)
+        if matched_cols:
+            s_val = pd.Series(index=df.index, dtype=float)
+            for c in matched_cols:
+                num_s = pd.to_numeric(df[c], errors='coerce')
+                s_val = s_val.combine_first(num_s)
+            df[target_col] = s_val.fillna(0.0)
+
+    return df
 
 @st.cache_data(ttl=86400)
 def load_nfl_monday_teams():
