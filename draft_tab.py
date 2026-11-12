@@ -10,14 +10,14 @@ NFL_DRAFT_NORM = {
     'CAR': 'CAR', 'Car': 'CAR', 'CHI': 'CHI', 'Chi': 'CHI',
     'CIN': 'CIN', 'Cin': 'CIN', 'CLE': 'CLE', 'Cle': 'CLE',
     'DAL': 'DAL', 'Dal': 'DAL', 'DEN': 'DEN', 'Den': 'DEN',
-    'DET': 'DET', 'Det': 'DET', 'GBP': 'GB',  'HOU': 'HOU', 
-    'Hou': 'HOU', 'IND': 'IND', 'Ind': 'IND', 'JAX': 'JAX', 
-    'Jax': 'JAX', 'KCC': 'KC',  'LAC': 'LAC', 'LAR': 'LAR', 
-    'LVR': 'LV',  'MIA': 'MIA', 'Mia': 'MIA', 'MIN': 'MIN', 
-    'Min': 'MIN', 'NEP': 'NE',  'NOL': 'NO',  'NYG': 'NYG', 
-    'NYJ': 'NYJ', 'PHI': 'PHI', 'Phi': 'PHI', 'PIT': 'PIT', 
-    'Pit': 'PIT', 'SEA': 'SEA', 'Sea': 'SEA', 'SF9': 'SF',  
-    'TBB': 'TB',  'TEN': 'TEN', 'Ten': 'TEN', 'WSH': 'WAS', 
+    'DET': 'DET', 'Det': 'DET', 'GBP': 'GB',  'HOU': 'HOU',
+    'Hou': 'HOU', 'IND': 'IND', 'Ind': 'IND', 'JAX': 'JAX',
+    'Jax': 'JAX', 'KCC': 'KC',  'LAC': 'LAC', 'LAR': 'LAR',
+    'LVR': 'LV',  'MIA': 'MIA', 'Mia': 'MIA', 'MIN': 'MIN',
+    'Min': 'MIN', 'NEP': 'NE',  'NOL': 'NO',  'NYG': 'NYG',
+    'NYJ': 'NYJ', 'PHI': 'PHI', 'Phi': 'PHI', 'PIT': 'PIT',
+    'Pit': 'PIT', 'SEA': 'SEA', 'Sea': 'SEA', 'SF9': 'SF',
+    'TBB': 'TB',  'TEN': 'TEN', 'Ten': 'TEN', 'WSH': 'WAS',
     'Wsh': 'WAS', 'FrA': 'FA',  'WAS': 'WAS', 'LV': 'LV',
     'GB': 'GB',   'KC': 'KC',   'NE': 'NE',   'NO': 'NO',
     'SF': 'SF',   'TB': 'TB'
@@ -97,7 +97,7 @@ def render_table(df, left_align_cols=None, highlight_fn=None):
             styler = styler.set_properties(subset=valid_cols, **{'text-align': 'left'})
     if highlight_fn:
         styler = styler.apply(highlight_fn, axis=1)
-        
+
     styled_html = styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
         {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
@@ -170,22 +170,18 @@ def render(box_df=None):
     trades_df = pd.DataFrame()
     try:
         import transactions_tab
-        _, trades_df = transactions_tab.load_transactions_data(box_df)
-    except Exception:
-        pass
-
-    dva_df = value_engine.compute_draft_value_added(df, box_df, trades_df)
-    trades_df = pd.DataFrame()
-    try:
-        import transactions_tab
         importlib.reload(transactions_tab)
         _, trades_df = transactions_tab.load_transactions_data(box_df)
     except Exception:
         pass
 
-    dva_df = value_engine.compute_draft_value_added(df, box_df, trades_df)
-    if not dva_df.empty and 'Trade_Adj_DVA' not in dva_df.columns and 'Trade_Adj_DVA' in dva_df.columns:
-        dva_df['Trade_Adj_DVA'] = dva_df['Trade_Adj_DVA']
+    try:
+        dva_df = value_engine.compute_draft_value_added(df, box_df, trades_df)
+    except TypeError:
+        dva_df = value_engine.compute_draft_value_added(df, box_df)
+
+    if not dva_df.empty and 'Trade_Adj_DVA' not in dva_df.columns:
+        dva_df['Trade_Adj_DVA'] = dva_df['Manager_DVA'] if 'Manager_DVA' in dva_df.columns else dva_df['Pick_DVA']
 
     draft_view = st.radio(
         "Draft View:",
@@ -197,7 +193,7 @@ def render(box_df=None):
             "Draft Records & Loyalty"
         ],
         horizontal=True,
-        key="draft_sub_view_v4"
+        key="draft_sub_view_v6"
     )
     st.write("---")
 
@@ -267,7 +263,7 @@ def render(box_df=None):
         )
         st.markdown(board_html, unsafe_allow_html=True)
 
-   elif draft_view == "Draft Value Added (DVA)":
+    elif draft_view == "Draft Value Added (DVA)":
         st.caption(
             "**Pick DVA** grades the draft pick across the full season regardless of who owned the player later. "
             "**Trade-Adj DVA** grades the full-season return realized by the drafting manager (pre-trade starts + allocated post-trade value of players acquired in return, minus the pick's slot hurdle)."
@@ -285,7 +281,7 @@ def render(box_df=None):
                 "Manager Draft Value Leaderboard"
             ],
             horizontal=True,
-            key="dva_mode_sel_v5"
+            key="dva_mode_sel_v6"
         )
 
         c1, c2, c3 = st.columns(3)
@@ -375,7 +371,8 @@ def render(box_df=None):
                 p_df['Starts'] = p_df['Total_Starts'].astype(int)
                 p_df['Pts / Start'] = p_df['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
                 p_df['Pick DVA'] = p_df['Pick_DVA'].apply(fmt_signed)
-                disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team', 'Starts', 'Pts / Start', 'Pos_Rank', 'Pick DVA']].rename(
+                p_df['Trade-Adj DVA'] = p_df['Trade_Adj_DVA'].apply(fmt_signed)
+                disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team', 'Starts', 'Pts / Start', 'Pos_Rank', 'Pick DVA', 'Trade-Adj DVA']].rename(
                     columns={'Team': 'Drafted By', 'Round Pick': 'Pick in Rd', 'Pos_Rank': 'Pos Rank'}
                 )
             else:
@@ -392,14 +389,15 @@ def render(box_df=None):
 
         m_df = base_df[base_df['Team'] == sel_mgr].copy()
         if sel_m_yr == "All-Time Summary":
-            c_left, c_right = st.columns([1.2, 1.8])
+            c_left, c_right = st.columns([1.3, 1.7])
             with c_left:
                 st.write(f"#### {sel_mgr}'s Round 1 History")
                 r1_df = m_df[m_df['Round'] == 1].sort_values('Year', ascending=False).copy()
                 if 'Pick_DVA' in r1_df.columns:
                     r1_df['Pts / Start'] = r1_df['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
                     r1_df['Pick DVA'] = r1_df['Pick_DVA'].apply(fmt_signed)
-                    r1_disp = r1_df[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Pts / Start', 'Pos_Rank', 'Pick DVA']].rename(
+                    r1_df['Trade-Adj DVA'] = r1_df['Trade_Adj_DVA'].apply(fmt_signed)
+                    r1_disp = r1_df[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Pts / Start', 'Pos_Rank', 'Pick DVA', 'Trade-Adj DVA']].rename(
                         columns={'Overall Pick': 'Pick #', 'Pos_Rank': 'Pos Rank'}
                     )
                 else:
