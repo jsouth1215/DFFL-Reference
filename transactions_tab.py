@@ -1,6 +1,29 @@
 import streamlit as st
 import pandas as pd
 
+AUSTIN_2018_TX_IDS = {
+    '07665c7b-31c1-3522-becc-c8dbf658c6de', '1e73b042-7f5b-3a4b-b80f-9d36e5fce067',
+    '2890ba27-3381-3a5c-9892-2c31d6da91f9', '350e6e9b-d32e-3807-9fd5-057ffb5bbffb',
+    '37801877-9b94-3159-b82e-80427dc50d4a', '3931fa74-44a8-323b-b7ce-95351f30b6b0',
+    '3c4fa8d5-993f-3c88-b831-9df38ea2e0de', '434c366a-687c-3069-9b7a-960915dd7c5f',
+    '4a7c45f1-dc4e-309c-a861-61244658d160', '4bdcb8dd-621c-3044-8efd-15888e29ecb6',
+    '5b09bfc2-a54c-3f90-a313-e6789320f1f2', '5e301ec0-6fbb-3de9-976b-36a143bdcbcd',
+    '6076cc3e-b429-3a3c-8f84-c7d85c3686f1', '662979ff-51e9-3890-9b4e-2e1545316701',
+    '6e8f8a1b-25af-38d0-acd3-e681629cdfc7', '7180c044-df2d-3e9b-abdb-0a14a734c3d4',
+    '773fc339-c0d4-3778-90cb-e5a6d5d89118', '8589bd62-66f2-33f2-9f3a-3fcb2fcc4a89',
+    '87fbb4bd-3979-313d-92f8-fee7233ebd9d', '905fe917-1afe-3513-956e-3b43530c2475',
+    '9aa22c1f-0344-364a-84f8-7a5528ef0cc2', 'a23d7c63-5449-30ed-ad20-91240d1f4c23',
+    'a497bf79-2c61-3bc0-9f69-b4b91366ea2d', 'aec2c9ce-d90d-300c-ac15-fd8a17bfdc77',
+    'b1982b89-0996-35f7-9f9f-edb6aa108297', 'b3f803ab-66de-3c11-8936-31d701ed487b',
+    'b714ce66-99d9-36b4-9342-09d90d22b37b', 'c2e1408d-27a9-3626-8902-90ed8b7d7fcf',
+    'ccb7f748-d35a-3ba7-95f5-1eb832c517e4', 'ce702d35-d0bc-37e3-b27d-4f177718c957',
+    'd09276c6-3304-365d-b5be-1318ed6698c4', 'd3033b54-12ea-31fc-b0f6-9fbd244640ae',
+    'd4255d16-7423-34ef-85e3-19f06e19e34d', 'd6c0c156-f9b0-34fc-b71c-30868ed3f715',
+    'd8fcf9e4-aff3-3255-a0a8-08bc08bb1a49', 'e41d9f37-9f2c-3dcf-8706-651690aec2ab',
+    'e7b47bdf-7da1-3d6e-8dc1-3c9b921cda4b', 'f1f89d17-f8ff-3b5c-a970-dd532cd3ae9f',
+    'fc185d7b-722a-33dd-9728-1252b7cb9d6c'
+}
+
 def render_table(df, left_align_cols=None, highlight_fn=None):
     styler = df.style.hide(axis='index')
     styler = styler.set_properties(**{
@@ -22,12 +45,67 @@ def render_table(df, left_align_cols=None, highlight_fn=None):
     ]).to_html()
     st.markdown(styled_html, unsafe_allow_html=True)
 
+def clean_2018_rows(df):
+    if df.empty or 2018 not in df['Season'].values:
+        return df
+
+    df = df[df['Player'].astype(str).str.strip() != 'Player 100001'].copy()
+
+    def fix_row(r):
+        if int(r['Season']) != 2018:
+            return r
+        tx_id = str(r['Transaction_ID']).strip()
+        pl = str(r['Player']).strip()
+        tx_type = str(r['Type']).strip()
+        init = str(r['Initiating_Team']).strip()
+        frm = str(r['From_Team']).strip()
+        to = str(r['To_Team']).strip()
+
+        if tx_type == 'TRADE_ACCEPT':
+            r['Status'] = 'EXECUTED'
+
+        if init == 'Team -2147483648':
+            init = to if to != 'Free Agency / Waivers' else frm
+
+        if tx_id == '1116403b-4b04-35a2-a8d1-c6d3ddd25844':
+            if pl in ['Cam Newton', 'Robby Anderson']:
+                frm = 'Austin'
+                if r['Action'] == 'TRADE':
+                    to = 'Noah'
+            elif pl in ['T.Y. Hilton', 'Chris Godwin']:
+                frm = 'Noah'
+                to = 'Austin'
+            init = 'Austin'
+        elif tx_id in AUSTIN_2018_TX_IDS:
+            if init == 'Noah': init = 'Austin'
+            if frm == 'Noah': frm = 'Austin'
+            if to == 'Noah': to = 'Austin'
+
+        r['Initiating_Team'] = init
+        r['From_Team'] = frm
+        r['To_Team'] = to
+        return r
+
+    return df.apply(fix_row, axis=1)
+
 @st.cache_data(ttl=600)
 def load_transactions_data(box_df=None):
+    dfs = []
     try:
-        df = pd.read_excel("espn_transactions_2019_2026.xlsx", sheet_name="Transactions", engine="openpyxl")
+        df_merged = pd.read_excel("espn_transactions_2018_2026.xlsx", sheet_name="Transactions", engine="openpyxl")
+        dfs.append(df_merged)
     except Exception:
+        for fname in ["espn_transactions_2019_2026.xlsx", "espn_transactions_2018.xlsx"]:
+            try:
+                dfs.append(pd.read_excel(fname, sheet_name="Transactions", engine="openpyxl"))
+            except Exception:
+                pass
+
+    if not dfs:
         return pd.DataFrame(), pd.DataFrame()
+
+    df = pd.concat(dfs, ignore_index=True)
+    df = df.drop_duplicates(subset=['Season', 'Transaction_ID', 'Action', 'Player']).copy()
 
     for col in ['Initiating_Team', 'From_Team', 'To_Team']:
         if col in df.columns:
@@ -41,6 +119,8 @@ def load_transactions_data(box_df=None):
     df['Status'] = df['Status'].fillna('').astype(str).str.strip()
     df['Type'] = df['Type'].fillna('').astype(str).str.strip()
     df['Action'] = df['Action'].fillna('').astype(str).str.strip()
+
+    df = clean_2018_rows(df)
 
     trades_list = []
     seen_trade_pairs = set()
@@ -84,7 +164,7 @@ def load_transactions_data(box_df=None):
         exec_adds = df[(df['Status'] == 'EXECUTED') & (df['Action'] == 'ADD')]
 
         for szn in sorted(b_c['Szn'].unique()):
-            if szn < 2019:
+            if szn < 2018:
                 continue
             szn_box = b_c[b_c['Szn'] == szn]
             weeks = sorted(szn_box['Wk'].unique())
@@ -138,17 +218,17 @@ def load_transactions_data(box_df=None):
 def render(box_df=None):
     df, trades_df = load_transactions_data(box_df)
     if df.empty:
-        st.warning("Could not load 'espn_transactions_2019_2026.xlsx'. Make sure it is uploaded to the repository root.")
+        st.warning("Could not load transaction data. Make sure 'espn_transactions_2019_2026.xlsx' and 'espn_transactions_2018.xlsx' are uploaded to the repository root.")
         return
 
     tx_view = st.radio(
         "Transactions View:",
         [
-            "📊 Manager Activity Leaderboard",
-            "🔥 Most Added & Dropped Players",
-            "💰 FAAB & Waiver Wire Battles",
-            "🤝 Trade History Log",
-            "📜 Full Transaction Search"
+            "Manager Activity Leaderboard",
+            "Most Added & Dropped Players",
+            "FAAB & Waiver Wire Battles",
+            "Trade History Log",
+            "Full Transaction Search"
         ],
         horizontal=True,
         key="tx_sub_view"
@@ -156,14 +236,18 @@ def render(box_df=None):
     st.write("---")
 
     seasons_avail = sorted(df['Season'].unique().tolist(), reverse=True)
+    min_yr = min(seasons_avail) if seasons_avail else 2018
+    max_yr = max(seasons_avail) if seasons_avail else 2026
+    all_time_lbl = f"All-Time ({min_yr}–{max_yr})"
+
     exec_df = df[df['Status'] == 'EXECUTED'].copy()
     adds_df = exec_df[exec_df['Action'] == 'ADD'].copy()
     drops_df = exec_df[exec_df['Action'] == 'DROP'].copy()
     managers_list = sorted([m for m in adds_df['Initiating_Team'].unique() if m and m != 'Free Agency / Waivers'])
 
     # ================= VIEW 1: MANAGER LEADERBOARD =================
-    if tx_view == "📊 Manager Activity Leaderboard":
-        sel_szn = st.selectbox("Select Season:", ["All-Time (2019–2026)"] + [str(s) for s in seasons_avail], key="tx_ldr_szn")
+    if tx_view == "Manager Activity Leaderboard":
+        sel_szn = st.selectbox("Select Season:", [all_time_lbl] + [str(s) for s in seasons_avail], key="tx_ldr_szn")
         is_all_time = sel_szn.startswith("All-Time")
         show_faab = is_all_time or (int(sel_szn) >= 2026)
 
@@ -212,9 +296,9 @@ def render(box_df=None):
         render_table(ldr_df[base_cols])
 
     # ================= VIEW 2: MOST ADDED & DROPPED PLAYERS =================
-    elif tx_view == "🔥 Most Added & Dropped Players":
+    elif tx_view == "Most Added & Dropped Players":
         c1, c2, c3 = st.columns(3)
-        sel_szn = c1.selectbox("Season:", ["All-Time (2019–2026)"] + [str(s) for s in seasons_avail], key="tx_pop_szn")
+        sel_szn = c1.selectbox("Season:", [all_time_lbl] + [str(s) for s in seasons_avail], key="tx_pop_szn")
         pos_filter = c2.selectbox("Position Filter:", ["Non-D/ST & K (Skill Players)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="tx_pop_pos")
         act_filter = c3.radio("Action:", ["Most Added", "Most Dropped"], horizontal=True, key="tx_pop_act")
 
@@ -241,13 +325,13 @@ def render(box_df=None):
         render_table(pop[['Rank', 'Player', 'Pos', lbl_cnt, 'Unique Managers', 'Managers Involved']], left_align_cols=['Player', 'Managers Involved'])
 
     # ================= VIEW 3: FAAB & WAIVER WIRE BATTLES =================
-    elif tx_view == "💰 FAAB & Waiver Wire Battles":
+    elif tx_view == "FAAB & Waiver Wire Battles":
         mode = st.radio(
             "Select Waiver View:",
             [
                 "FAAB Bidding Wars (2026+)",
                 "Largest Winning FAAB Bids (2026+)",
-                "Priority Waiver Fights (2019–2025)"
+                f"Priority Waiver Fights ({min_yr}–2025)"
             ],
             horizontal=True,
             key="tx_faab_mode"
@@ -293,17 +377,29 @@ def render(box_df=None):
             else:
                 st.info("No FAAB bids recorded.")
 
-        elif mode == "Priority Waiver Fights (2019–2025)":
-            st.write("#### Pre-FAAB Priority Waiver Fights (2019–2025)")
+        else:
+            st.write(f"#### Pre-FAAB Priority Waiver Fights ({min_yr}–2025)")
             st.caption("Weeks where multiple managers submitted a waiver claim for the same player and the manager with higher waiver priority won the claim.")
             pre_szns = sorted([s for s in seasons_avail if s <= 2025], reverse=True)
-            sel_pre_szn = st.selectbox("Filter Season:", ["All Pre-FAAB Seasons (2019–2025)"] + [str(s) for s in pre_szns], key="tx_pre_waiv_szn")
+            sel_pre_szn = st.selectbox("Filter Season:", [f"All Pre-FAAB Seasons ({min_yr}–2025)"] + [str(s) for s in pre_szns], key="tx_pre_waiv_szn")
 
-            w_pre = df[(df['Season'] <= 2025) & (df['Type'] == 'WAIVER') & (df['Action'] == 'ADD') & (df['Status'].isin(['EXECUTED', 'FAILED_INVALIDPLAYERSOURCE']))].copy()
+            w_pre = df[
+                (df['Season'] <= 2025) &
+                (df['Type'] == 'WAIVER') &
+                (df['Action'] == 'ADD') &
+                (
+                    (df['Status'] == 'EXECUTED') |
+                    (df['Status'] == 'FAILED_INVALIDPLAYERSOURCE') |
+                    ((df['Season'] == 2018) & (df['Status'].isin(['PENDING', 'FAILED_MATCHUPACQUISITIONLIMIT'])))
+                )
+            ].copy()
+
             if not sel_pre_szn.startswith("All"):
                 w_pre = w_pre[w_pre['Season'] == int(sel_pre_szn)]
 
-            w_pre_dedup = w_pre.sort_values('Status').drop_duplicates(subset=['Season', 'Week', 'Player', 'To_Team'])
+            w_pre['is_exec'] = (w_pre['Status'] == 'EXECUTED').astype(int)
+            w_pre_dedup = w_pre.sort_values('is_exec', ascending=False).drop_duplicates(subset=['Season', 'Week', 'Player', 'To_Team'])
+
             fights = []
             for (szn, wk, pl), grp in w_pre_dedup.groupby(['Season', 'Week', 'Player']):
                 if len(grp) > 1 and ('EXECUTED' in grp['Status'].values):
@@ -329,8 +425,8 @@ def render(box_df=None):
                 st.info("No contested priority waiver claims found for the selected filter.")
 
     # ================= VIEW 4: TRADE HISTORY LOG =================
-    elif tx_view == "🤝 Trade History Log":
-        st.write("#### Complete League Trade History (2019–2026)")
+    elif tx_view == "Trade History Log":
+        st.write(f"#### Complete League Trade History ({min_yr}–{max_yr})")
         if not trades_df.empty:
             c1, c2 = st.columns(2)
             t_szn = c1.selectbox("Filter by Season:", ["All Seasons"] + [str(s) for s in sorted(trades_df['Season'].unique(), reverse=True)], key="tr_szn")
@@ -350,7 +446,7 @@ def render(box_df=None):
             st.info("No trades found.")
 
     # ================= VIEW 5: FULL TRANSACTION SEARCH =================
-    elif tx_view == "📜 Full Transaction Search":
+    elif tx_view == "Full Transaction Search":
         c1, c2, c3 = st.columns(3)
         s_szn = c1.selectbox("Season:", ["All Seasons"] + [str(s) for s in seasons_avail], key="fs_szn")
         s_mgr = c2.selectbox("Manager:", ["All Managers"] + managers_list, key="fs_mgr")
