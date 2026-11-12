@@ -2153,16 +2153,14 @@ with tab_player:
         counted_nfl = counted.copy()
         counted_nfl['Mapped_NFL_Team'] = counted_nfl.apply(map_row_to_nfl_team, axis=1)
 
-        total_mgr_pts = counted_nfl[pts_c].sum()
-
         nfl_summary_rows = []
         for nfl_team in ALL_32_NFL_TEAMS:
             t_data = counted_nfl[counted_nfl['Mapped_NFL_Team'] == nfl_team]
             starts_cnt = len(t_data)
             tot_pts = t_data[pts_c].sum()
             pts_per_start = tot_pts / starts_cnt if starts_cnt > 0 else 0.0
-            pct_pts = (tot_pts / total_mgr_pts * 100) if total_mgr_pts > 0 else 0.0
-            
+            pos_pts = t_data.groupby('Clean_Pos')[pts_c].sum().to_dict() if not t_data.empty else {}
+
             if not t_data.empty and tot_pts > 0:
                 p_lead = t_data.groupby(name_c)[pts_c].sum().sort_values(ascending=False)
                 top_player_str = f"{p_lead.index[0]} ({p_lead.iloc[0]:.1f})"
@@ -2175,7 +2173,12 @@ with tab_player:
                 'Points_Num': tot_pts,
                 'Points': f"{tot_pts:.1f}",
                 'Pts / Start': f"{pts_per_start:.1f}",
-                '% of Team Pts': f"{pct_pts:.1f}%",
+                'QB': f"{pos_pts.get('QB', 0.0):.1f}",
+                'RB': f"{pos_pts.get('RB', 0.0):.1f}",
+                'WR': f"{pos_pts.get('WR', 0.0):.1f}",
+                'TE': f"{pos_pts.get('TE', 0.0):.1f}",
+                'K': f"{pos_pts.get('K', 0.0):.1f}",
+                'D/ST': f"{pos_pts.get('D/ST', 0.0):.1f}",
                 'Top Contributor': top_player_str
             })
 
@@ -2183,7 +2186,7 @@ with tab_player:
         df_nfl = apply_competition_rank(df_nfl, 'Points_Num', round_digits=1)
 
         render_html_table(
-            df_nfl[['Rank', 'NFL Team', 'Starts', 'Points', 'Pts / Start', '% of Team Pts', 'Top Contributor']],
+            df_nfl[['Rank', 'NFL Team', 'Starts', 'Points', 'Pts / Start', 'QB', 'RB', 'WR', 'TE', 'K', 'D/ST', 'Top Contributor']],
             left_align_cols=['NFL Team', 'Top Contributor']
         )
         # ================= TAB 8: DRAFT =================
