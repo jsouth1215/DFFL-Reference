@@ -1,6 +1,8 @@
+import importlib
 import streamlit as st
 import pandas as pd
 import value_engine
+importlib.reload(value_engine)
 
 NFL_DRAFT_NORM = {
     'ARI': 'ARI', 'Ari': 'ARI', 'ATL': 'ATL', 'Atl': 'ATL',
