@@ -167,11 +167,11 @@ def render(box_df=None):
         st.warning("Could not load 'Draft History.xlsx' (sheet: 'Consolidated'). Make sure it is uploaded to the repository root.")
         return
 
-    trades_df = pd.DataFrame()
+    tx_df, trades_df = pd.DataFrame(), pd.DataFrame()
     try:
         import transactions_tab
         importlib.reload(transactions_tab)
-        _, trades_df = transactions_tab.load_transactions_data(box_df)
+        tx_df, trades_df = transactions_tab.load_transactions_data(box_df)
     except Exception:
         pass
 
@@ -193,7 +193,7 @@ def render(box_df=None):
             "Draft Records & Loyalty"
         ],
         horizontal=True,
-        key="draft_sub_view_v6"
+        key="draft_sub_view_v7"
     )
     st.write("---")
 
@@ -281,7 +281,7 @@ def render(box_df=None):
                 "Manager Draft Value Leaderboard"
             ],
             horizontal=True,
-            key="dva_mode_sel_v6"
+            key="dva_mode_sel_v7"
         )
 
         c1, c2, c3 = st.columns(3)
@@ -346,16 +346,9 @@ def render(box_df=None):
             cols = ['Rank', 'Manager', 'Picks', 'Total Pick DVA', 'Total Trade-Adj DVA', 'Avg Pick DVA', 'Hit Rate (>0 DVA)', 'Best Pick', 'Worst Bust']
             render_table(m_df[cols], left_align_cols=['Best Pick', 'Worst Bust'])
 
-  elif draft_view == "Player Draft Ledger":
+    elif draft_view == "Player Draft Ledger":
         b_norm = value_engine.normalize_box_df(box_df)
         b_scored, _ = value_engine.compute_weekly_scores(b_norm)
-
-        tx_df = pd.DataFrame()
-        try:
-            import transactions_tab
-            tx_df, trades_df = transactions_tab.load_transactions_data(box_df)
-        except Exception:
-            pass
 
         draft_players = set(df['Player'].dropna().unique()) if not df.empty else set()
         box_players = set(b_scored['Pl'].dropna().unique()) if not b_scored.empty else set()
@@ -373,7 +366,6 @@ def render(box_df=None):
             trades_df['Manager 2 Receives'].astype(str).str.contains(sel_player, regex=False, na=False)
         ].copy() if not trades_df.empty else pd.DataFrame()
 
-        # --- 1. TOP-LEVEL CAREER KPI BANNER ---
         p_starts = p_box[p_box['Is_Start']] if not p_box.empty else pd.DataFrame()
         tot_starts = len(p_starts)
         tot_start_pts = p_starts['Pts'].sum() if not p_starts.empty else 0.0
@@ -396,7 +388,6 @@ def render(box_df=None):
 
         st.write("---")
 
-        # --- 2. SEASON-BY-SEASON CAREER LOG (ALL SEASONS DRAFTED OR ROSTERED) ---
         st.write(f"#### {sel_player} — Season-by-Season Summary")
         szn_set = sorted(
             list(set(p_draft['Year'].unique().tolist() if not p_draft.empty else []) |
@@ -455,7 +446,6 @@ def render(box_df=None):
         if szn_rows:
             render_table(pd.DataFrame(szn_rows), left_align_cols=['Draft Status', 'Managers Started For'])
 
-        # --- 3. FRANCHISE / MANAGER BREAKDOWN & TRANSACTION TIMELINE ---
         c_left, c_right = st.columns([1.15, 1.85])
         with c_left:
             st.write("#### Production by DFFL Manager")
