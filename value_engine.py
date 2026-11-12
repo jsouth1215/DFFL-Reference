@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -46,6 +47,154 @@ ESPN_TEAM_TO_MGR = {
     'lemme get a graham': 'Sean'
 }
 
+PLAYER_ALIASES = {
+    'kenny gainwell': 'Kenneth Gainwell',
+    'kenneth gainwell': 'Kenneth Gainwell',
+    'marquise brown': 'Hollywood Brown',
+    'hollywood brown': 'Hollywood Brown',
+    'gabe davis': 'Gabe Davis',
+    'gabriel davis': 'Gabe Davis',
+    'josh palmer': 'Joshua Palmer',
+    'joshua palmer': 'Joshua Palmer',
+    'chig okonkwo': 'Chig Okonkwo',
+    'chigoziem okonkwo': 'Chig Okonkwo',
+    'tank dell': 'Tank Dell',
+    'nathaniel dell': 'Tank Dell',
+    'robbie chosen': 'Robby Anderson',
+    'chosen anderson': 'Robby Anderson',
+    'robby anderson': 'Robby Anderson',
+    'robbie anderson': 'Robby Anderson',
+    'scotty miller': 'Scotty Miller',
+    'scott miller': 'Scotty Miller',
+    'mitch trubisky': 'Mitchell Trubisky',
+    'mitchell trubisky': 'Mitchell Trubisky',
+    'elijah mitchell': 'Elijah Mitchell',
+    'eli mitchell': 'Elijah Mitchell',
+    'aj dillon': 'AJ Dillon',
+    'a.j. dillon': 'AJ Dillon',
+    'dj moore': 'DJ Moore',
+    'd.j. moore': 'DJ Moore',
+    'dk metcalf': 'DK Metcalf',
+    'd.k. metcalf': 'DK Metcalf',
+    'jk dobbins': 'J.K. Dobbins',
+    'j.k. dobbins': 'J.K. Dobbins',
+    'tj hockenson': 'T.J. Hockenson',
+    't.j. hockenson': 'T.J. Hockenson',
+    'cj stroud': 'C.J. Stroud',
+    'c.j. stroud': 'C.J. Stroud',
+    'aj brown': 'A.J. Brown',
+    'a.j. brown': 'A.J. Brown',
+    'cd lamb': 'CeeDee Lamb',
+    'ceedee lamb': 'CeeDee Lamb',
+    'devon achane': "De'Von Achane",
+    "de'von achane": "De'Von Achane",
+    'tank bigsby': 'Tank Bigsby',
+    'cartavious bigsby': 'Tank Bigsby',
+    'bucky irving': 'Bucky Irving',
+    "mar'keise irving": 'Bucky Irving',
+    'james cook': 'James Cook',
+    'james cook iii': 'James Cook',
+    'aaron jones': 'Aaron Jones',
+    'aaron jones sr.': 'Aaron Jones',
+    'aaron jones sr': 'Aaron Jones',
+    'patrick mahomes': 'Patrick Mahomes',
+    'patrick mahomes ii': 'Patrick Mahomes',
+    'todd gurley': 'Todd Gurley II',
+    'todd gurley ii': 'Todd Gurley II',
+    'melvin gordon': 'Melvin Gordon III',
+    'melvin gordon iii': 'Melvin Gordon III',
+    'mark ingram': 'Mark Ingram II',
+    'mark ingram ii': 'Mark Ingram II',
+    'allen robinson': 'Allen Robinson II',
+    'allen robinson ii': 'Allen Robinson II',
+    'marvin jones': 'Marvin Jones Jr.',
+    'marvin jones jr.': 'Marvin Jones Jr.',
+    'odell beckham': 'Odell Beckham Jr.',
+    'odell beckham jr.': 'Odell Beckham Jr.',
+    'duke johnson': 'Duke Johnson Jr.',
+    'duke johnson jr.': 'Duke Johnson Jr.',
+    'will fuller': 'Will Fuller V',
+    'will fuller v': 'Will Fuller V',
+    'ronald jones': 'Ronald Jones II',
+    'ronald jones ii': 'Ronald Jones II',
+    'darrell henderson': 'Darrell Henderson Jr.',
+    'darrell henderson jr.': 'Darrell Henderson Jr.',
+    'laviska shenault': 'Laviska Shenault Jr.',
+    'laviska shenault jr.': 'Laviska Shenault Jr.',
+    'henry ruggs': 'Henry Ruggs III',
+    'henry ruggs iii': 'Henry Ruggs III',
+    'benny snell': 'Benny Snell Jr.',
+    'benny snell jr.': 'Benny Snell Jr.',
+    'lynn bowden': 'Lynn Bowden Jr.',
+    'lynn bowden jr.': 'Lynn Bowden Jr.',
+    'kj hamler': 'KJ Hamler',
+    'k.j. hamler': 'KJ Hamler',
+    'irv smith': 'Irv Smith Jr.',
+    'irv smith jr.': 'Irv Smith Jr.',
+    'gardner minshew': 'Gardner Minshew II',
+    'gardner minshew ii': 'Gardner Minshew II',
+    'dj chark': 'DJ Chark Jr.',
+    'd.j. chark': 'DJ Chark Jr.',
+    'dj chark jr.': 'DJ Chark Jr.',
+    'd.j. chark jr.': 'DJ Chark Jr.',
+    'jeff wilson': 'Jeff Wilson Jr.',
+    'jeff wilson jr.': 'Jeff Wilson Jr.',
+    'jeffery wilson': 'Jeff Wilson Jr.',
+    'travis etienne': 'Travis Etienne Jr.',
+    'travis etienne jr.': 'Travis Etienne Jr.',
+    'kenneth walker': 'Kenneth Walker III',
+    'kenneth walker iii': 'Kenneth Walker III',
+    'ken walker': 'Kenneth Walker III',
+    'ken walker iii': 'Kenneth Walker III',
+    'brian robinson': 'Brian Robinson Jr.',
+    'brian robinson jr.': 'Brian Robinson Jr.',
+    'michael pittman': 'Michael Pittman Jr.',
+    'michael pittman jr.': 'Michael Pittman Jr.',
+    'calvin austin': 'Calvin Austin III',
+    'calvin austin iii': 'Calvin Austin III',
+    'john metchie': 'John Metchie III',
+    'john metchie iii': 'John Metchie III',
+    'pierre strong': 'Pierre Strong Jr.',
+    'pierre strong jr.': 'Pierre Strong Jr.',
+    'isiah pacheco': 'Isiah Pacheco',
+    'isaiah pacheco': 'Isiah Pacheco',
+    'brian thomas': 'Brian Thomas Jr.',
+    'brian thomas jr.': 'Brian Thomas Jr.',
+    'marvin harrison': 'Marvin Harrison Jr.',
+    'marvin harrison jr.': 'Marvin Harrison Jr.',
+    'michael penix': 'Michael Penix Jr.',
+    'michael penix jr.': 'Michael Penix Jr.',
+    'tyrone tracy': 'Tyrone Tracy Jr.',
+    'tyrone tracy jr.': 'Tyrone Tracy Jr.',
+    'ollie gordon': 'Ollie Gordon II',
+    'ollie gordon ii': 'Ollie Gordon II',
+    'luther burden': 'Luther Burden III',
+    'luther burden iii': 'Luther Burden III',
+    'harold fannin': 'Harold Fannin Jr.',
+    'harold fannin jr.': 'Harold Fannin Jr.',
+    'anthony richardson': 'Anthony Richardson',
+    'anthony richardson sr.': 'Anthony Richardson',
+    'deebo samuel': 'Deebo Samuel',
+    'deebo samuel sr.': 'Deebo Samuel',
+    'redskins d/st': 'Commanders D/ST',
+    'washington d/st': 'Commanders D/ST',
+    'football team d/st': 'Commanders D/ST',
+}
+
+SUFFIX_RE = re.compile(r'\s+(jr\.?|sr\.?|ii|iii|iv|v)$', re.IGNORECASE)
+
+def normalize_player_name(name):
+    if pd.isna(name):
+        return ''
+    s = re.sub(r'\s+', ' ', str(name).strip())
+    low = s.lower()
+    if low in PLAYER_ALIASES:
+        return PLAYER_ALIASES[low]
+    base_low = SUFFIX_RE.sub('', low).strip()
+    if base_low in PLAYER_ALIASES:
+        return PLAYER_ALIASES[base_low]
+    return s
+
 def map_team_to_mgr(val):
     s = str(val).strip()
     low = s.lower()
@@ -71,7 +220,7 @@ def normalize_box_df(box_df):
     b['Szn'] = pd.to_numeric(b['Season'].astype(str).str.replace(r'\.0$', '', regex=True), errors='coerce').fillna(0).astype(int)
     b['Wk'] = pd.to_numeric(b['Week'], errors='coerce').fillna(0).astype(int)
     b['Mgr'] = b[tm_c].apply(map_team_to_mgr)
-    b['Pl'] = b[name_c].astype(str).str.strip()
+    b['Pl'] = b[name_c].apply(normalize_player_name)
     b['Pos'] = b[pos_c].astype(str).str.strip()
     b['Slot_Clean'] = b[slot_c].astype(str).str.strip().str.upper()
     b['Pts'] = pd.to_numeric(b[pts_c], errors='coerce').fillna(0.0)
@@ -107,19 +256,19 @@ def compute_weekly_scores(b):
     b['Wk_Pos_Rk'] = b.groupby(['Szn', 'Wk', 'Pos'])['Pts'].rank(ascending=False, method='min')
     return b, rep_map
 
-@st.cache_data(ttl=600)
 def parse_trade_side_players(side_str):
     items = []
     for part in str(side_str).split(','):
         part = part.strip()
         if '(' in part and part.endswith(')'):
-            items.append(part[:part.rfind('(')].strip())
+            p_name = part[:part.rfind('(')].strip()
+            items.append(normalize_player_name(p_name))
         elif part:
-            items.append(part)
+            items.append(normalize_player_name(part))
     return items
 
 @st.cache_data(ttl=600, show_spinner=False)
-def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=2):
+def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=3):
     b = normalize_box_df(box_df)
     if b.empty or draft_df is None or draft_df.empty:
         return pd.DataFrame()
@@ -154,6 +303,7 @@ def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=2):
 
     d = draft_df.copy()
     d['Team'] = d['Team'].apply(map_team_to_mgr)
+    d['Player'] = d['Player'].apply(normalize_player_name)
     d = d.merge(full_szn, left_on=['Year', 'Player'], right_on=['Szn', 'Pl'], how='left')
     d = d.merge(pos_totals[['Szn', 'Pl', 'Pos_Rank']], left_on=['Year', 'Player'], right_on=['Szn', 'Pl'], how='left')
     d = d.merge(mgr_szn, left_on=['Year', 'Team', 'Player'], right_on=['Szn', 'Mgr', 'Pl'], how='left')
@@ -177,12 +327,11 @@ def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=2):
         axis=1
     )
 
-    # Allocate post-trade value of acquired players back to the traded draft pick
     trade_return_map = {}
     if trades_df is not None and not trades_df.empty:
         b_idx = {k: grp for k, grp in b.groupby(['Szn', 'Mgr', 'Pl'])}
         pick_weight_lookup = {
-            (int(r['Year']), str(r['Player']).strip()): max(5.0, float(r['Expected_Val']))
+            (int(r['Year']), normalize_player_name(r['Player'])): max(5.0, float(r['Expected_Val']))
             for _, r in d.iterrows()
         }
 
@@ -224,7 +373,7 @@ def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=2):
                         trade_return_map[(szn, m2, p)] = m2_in_adj * (w / tot_w2)
 
     def calc_trade_adj_dva(r):
-        key = (int(r['Year']), str(r['Team']).strip(), str(r['Player']).strip())
+        key = (int(r['Year']), str(r['Team']).strip(), normalize_player_name(r['Player']))
         if key in trade_return_map:
             return float(r['Mgr_Raw_Val']) + float(trade_return_map[key]) - float(r['Expected_Val'])
         return float(r['Mgr_Raw_Val']) - float(r['Expected_Val'])
@@ -233,8 +382,9 @@ def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=2):
     d['Trade_Adj_DVA'] = d.apply(calc_trade_adj_dva, axis=1)
     d['Manager_DVA'] = d['Trade_Adj_DVA']
     return d
-@st.cache_data(ttl=600)
-def compute_waiver_value_added(tx_df, box_df):
+
+@st.cache_data(ttl=600, show_spinner=False)
+def compute_waiver_value_added(tx_df, box_df, _v=3):
     b = normalize_box_df(box_df)
     if b.empty or tx_df is None or tx_df.empty:
         return pd.DataFrame()
@@ -243,6 +393,7 @@ def compute_waiver_value_added(tx_df, box_df):
     adds = tx_df[(tx_df['Status'] == 'EXECUTED') & (tx_df['Action'] == 'ADD') & (tx_df['Type'].isin(['WAIVER', 'FREEAGENT']))].copy()
     if adds.empty:
         return pd.DataFrame()
+    adds['Player'] = adds['Player'].apply(normalize_player_name)
 
     b_dedup = b.sort_values('Is_Start', ascending=False).drop_duplicates(subset=['Szn', 'Wk', 'Pl'])
     szn_pos_rk = b_dedup.groupby(['Szn', 'Pos', 'Pl'])['Pts'].sum().reset_index()
@@ -251,6 +402,7 @@ def compute_waiver_value_added(tx_df, box_df):
 
     b_idx = {k: grp.sort_values('Wk') for k, grp in b.groupby(['Szn', 'Mgr', 'Pl'])}
     out_moves = tx_df[(tx_df['Status'] == 'EXECUTED') & (tx_df['Action'].isin(['DROP', 'TRADE']))].copy()
+    out_moves['Player'] = out_moves['Player'].apply(normalize_player_name)
     out_idx = {k: sorted(grp['Week'].tolist()) for k, grp in out_moves.groupby(['Season', 'From_Team', 'Player'])}
 
     rows = []
@@ -258,7 +410,7 @@ def compute_waiver_value_added(tx_df, box_df):
         szn = int(r['Season'])
         wk_add = int(r['Week'])
         mgr = map_team_to_mgr(r['To_Team'])
-        pl = str(r['Player']).strip()
+        pl = normalize_player_name(r['Player'])
         pos = str(r['Position']).strip()
         tx_type = str(r['Type']).strip()
         bid = int(r['Bid_Amount']) if szn >= 2026 and tx_type == 'WAIVER' else 0
@@ -313,8 +465,8 @@ def compute_waiver_value_added(tx_df, box_df):
 
     return pd.DataFrame(rows)
 
-@st.cache_data(ttl=600)
-def compute_trade_value_added(trades_df, box_df):
+@st.cache_data(ttl=600, show_spinner=False)
+def compute_trade_value_added(trades_df, box_df, _v=3):
     b = normalize_box_df(box_df)
     if b.empty or trades_df is None or trades_df.empty:
         return pd.DataFrame()
@@ -328,11 +480,11 @@ def compute_trade_value_added(trades_df, box_df):
         for part in str(side_str).split(','):
             part = part.strip()
             if '(' in part and part.endswith(')'):
-                p_name = part[:part.rfind('(')].strip()
+                p_name = normalize_player_name(part[:part.rfind('(')].strip())
                 p_pos = part[part.rfind('(')+1:-1].strip()
                 items.append((p_name, p_pos))
             elif part:
-                items.append((part, ''))
+                items.append((normalize_player_name(part), ''))
         return items
 
     def eval_side(szn, wk, mgr, player_tuples):
