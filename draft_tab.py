@@ -117,7 +117,7 @@ def load_draft_data(box_df=None):
     df['Overall Pick'] = pd.to_numeric(df['Overall Pick'], errors='coerce').astype(int)
     df['Round Pick'] = pd.to_numeric(df['Round Pick'], errors='coerce').astype(int)
     df['Team'] = df['Team'].astype(str).str.strip()
-    df['Player'] = df['Player'].astype(str).str.strip()
+    df['Player'] = df['Player'].apply(value_engine.normalize_player_name)
     df['Position'] = df['Position'].astype(str).str.strip()
     df['NFL_Raw'] = df['NFL Team'].astype(str).str.strip()
     df['NFL Team'] = df['NFL_Raw'].map(NFL_DRAFT_NORM).fillna(df['NFL_Raw'].str.upper())
