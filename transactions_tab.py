@@ -120,7 +120,7 @@ def load_transactions_data(box_df=None):
     df['Season'] = pd.to_numeric(df['Season'], errors='coerce').fillna(0).astype(int)
     df['Week'] = pd.to_numeric(df['Week'], errors='coerce').fillna(0).astype(int)
     df['Bid_Amount'] = pd.to_numeric(df['Bid_Amount'], errors='coerce').fillna(0).astype(int)
-    df['Player'] = df['Player'].fillna('').astype(str).str.strip()
+    df['Player'] = df['Player'].fillna('').apply(value_engine.normalize_player_name)
     df['Position'] = df['Position'].fillna('').astype(str).str.strip()
     df['Status'] = df['Status'].fillna('').astype(str).str.strip()
     df['Type'] = df['Type'].fillna('').astype(str).str.strip()
