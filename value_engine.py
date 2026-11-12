@@ -14,6 +14,48 @@ DEFAULT_REPLACEMENT = {
 BENCH_CLOG_PENALTY = 0.50
 ROSTER_SPOT_TAX_PER_WK = 1.50
 
+ESPN_TEAM_TO_MGR = {
+    'austin': 'Austin', 'austin cunney': 'Austin', 'comfort king': 'Austin',
+    'tanking for 2020': 'Austin', 'no problem noah!': 'Austin', 'the dark knight rises': 'Austin',
+    'brett': 'Brett', 'brett gardner': 'Brett', 'gg ff': 'Brett', 'oopsies': 'Brett', 'b💣💣mdoom': 'Brett',
+    'cameron': 'Cameron', 'cameron crabbe': 'Cameron', 'team cam': 'Cameron', 'cam': 'Cameron',
+    'cav': 'Cav', 'cav meininger': 'Cav', 'jim beans jeans': 'Cav', "rex ryan's tasty toes": 'Cav',
+    'king of queens': 'Cav', 'for whom le bell tolls': 'Cav',
+    'david': 'David', 'david klotz': 'David', 'purple nurples for you ii': 'David',
+    'purple nurples for you iii': 'David', 'great group of guys': 'David',
+    'lousy rotten group of guys': 'David', 'the monarch butterflies': 'David',
+    'the monarch bootyflies': 'David', 'joe cranberry + the berry boys': 'David',
+    'put ya hands up fbi!': 'David', 'no pasa nadaaaa': 'David',
+    'eli': 'Eli', 'eli  jacobowitz': 'Eli', 'eli jacobowitz': 'Eli', 'snick mcglick': 'Eli',
+    'michael thomas is trash': 'Eli', 'team eli': 'Eli',
+    'jack': 'Jack', 'jack southard': 'Jack', 'earl tackys khakis': 'Jack',
+    'cav eats little pieces of shit': 'Jack',
+    'keith': 'Keith', 'keith  bivas': 'Keith', 'keith bivas': 'Keith', 'stoooooooopittt .': 'Keith',
+    'this is how i  win': 'Keith', "fleckin '": 'Keith', 'kevin moskowitz': 'Keith',
+    'guiteau gang': 'Keith', 'the pancake house': 'Keith', 'team keith': 'Keith',
+    'lukas': 'Lukas', 'lukas repetti': 'Lukas', 'chief shmeef': 'Lukas',
+    'ronaiah tuiasosopo': 'Lukas', 'doctor shots': 'Lukas',
+    'matt': 'Matt', 'matthew berube': 'Matt', 'berube ;)': 'Matt', '1alexyoel15+': 'Matt',
+    '1alexyoel15+ 1alexyoel15+': 'Matt',
+    'max': 'Max', 'max sackett': 'Max', 'ligma fucking nuts': 'Max', 'russel wilsuckmydick': 'Max',
+    'noah': 'Noah', 'noah jacobowitz': 'Noah', 'snickersbotz mcgleezaks': 'Noah',
+    'outcoached and flecked': 'Noah', 'thank you austin!': 'Noah',
+    'sean': 'Sean', 'sean nicholson': 'Sean', 'sean morris': 'Sean', 'who but': 'Sean',
+    'taylor park boys': 'Sean', 'under  repair': 'Sean', 'medical tent': 'Sean',
+    'brooklyn bandits': 'Sean', 'harlem havoc': 'Sean', "sean's team": 'Sean',
+    'lemme get a graham': 'Sean'
+}
+
+def map_team_to_mgr(val):
+    s = str(val).strip()
+    low = s.lower()
+    if low in ESPN_TEAM_TO_MGR:
+        return ESPN_TEAM_TO_MGR[low]
+    for k, mgr in ESPN_TEAM_TO_MGR.items():
+        if len(k) > 4 and k in low:
+            return mgr
+    return s
+
 def normalize_box_df(box_df):
     if box_df is None or box_df.empty:
         return pd.DataFrame()
@@ -22,12 +64,13 @@ def normalize_box_df(box_df):
     pos_c = 'Position' if 'Position' in b.columns else ('Pos' if 'Pos' in b.columns else None)
     slot_c = 'Slot' if 'Slot' in b.columns else ('Lineup_Slot' if 'Lineup_Slot' in b.columns else None)
     pts_c = 'Actual_Points' if 'Actual_Points' in b.columns else ('Points' if 'Points' in b.columns else None)
-    if not all([name_c, pos_c, slot_c, pts_c]):
+    tm_c = 'Manager' if 'Manager' in b.columns else ('Team_Name' if 'Team_Name' in b.columns else None)
+    if not all([name_c, pos_c, slot_c, pts_c, tm_c]):
         return pd.DataFrame()
 
     b['Szn'] = pd.to_numeric(b['Season'].astype(str).str.replace(r'\.0$', '', regex=True), errors='coerce').fillna(0).astype(int)
     b['Wk'] = pd.to_numeric(b['Week'], errors='coerce').fillna(0).astype(int)
-    b['Mgr'] = b['Team_Name'].astype(str).str.strip().replace('1alexyoel15+', 'Matt')
+    b['Mgr'] = b[tm_c].apply(map_team_to_mgr)
     b['Pl'] = b[name_c].astype(str).str.strip()
     b['Pos'] = b[pos_c].astype(str).str.strip()
     b['Slot_Clean'] = b[slot_c].astype(str).str.strip().str.upper()
@@ -50,6 +93,7 @@ def compute_weekly_scores(b):
     b = b.copy()
     b['Rep_Base'] = b.apply(get_rep, axis=1)
     b['Is_Start'] = ~b['Slot_Clean'].isin(['BE', 'BENCH', 'IR'])
+    b['Is_Active_Gm'] = (b['Pts'] != 0) | b['Is_Start']
     b['Is_Bench_Clog'] = (b['Slot_Clean'].isin(['BE', 'BENCH'])) & (b['Pts'] > 0)
 
     def calc_wk_val(r):
@@ -60,6 +104,7 @@ def compute_weekly_scores(b):
         return 0.0
 
     b['Wk_Val'] = b.apply(calc_wk_val, axis=1)
+    b['Wk_Pos_Rk'] = b.groupby(['Szn', 'Wk', 'Pos'])['Pts'].rank(ascending=False, method='min')
     return b, rep_map
 
 @st.cache_data(ttl=600)
@@ -69,25 +114,45 @@ def compute_draft_value_added(draft_df, box_df):
         return pd.DataFrame()
     b, _ = compute_weekly_scores(b)
 
+    b_dedup = b.sort_values('Is_Start', ascending=False).drop_duplicates(subset=['Szn', 'Wk', 'Pl'])
+
+    pos_totals = b_dedup.groupby(['Szn', 'Pos', 'Pl']).agg(
+        Szn_Total_Pts=('Pts', 'sum'),
+        Active_Gms=('Is_Active_Gm', 'sum')
+    ).reset_index()
+    pos_totals['Pos_Rk_Int'] = pos_totals.groupby(['Szn', 'Pos'])['Szn_Total_Pts'].rank(ascending=False, method='min').astype(int)
+    pos_totals['Pos_Rank'] = np.where(pos_totals['Szn_Total_Pts'] > 0, pos_totals['Pos'] + pos_totals['Pos_Rk_Int'].astype(str), '-')
+
     full_szn = b.groupby(['Szn', 'Pl']).agg(
         Total_Starts=('Is_Start', 'sum'),
+        Total_Roster_Wks=('Wk', 'count'),
         Bench_Wks=('Is_Bench_Clog', 'sum'),
         Starter_Pts=('Pts', lambda s: s[b.loc[s.index, 'Is_Start']].sum()),
         Full_Raw_Val=('Wk_Val', 'sum')
     ).reset_index()
+    full_szn['Pts_Per_Start'] = np.where(full_szn['Total_Starts'] > 0, full_szn['Starter_Pts'] / full_szn['Total_Starts'], 0.0)
 
     mgr_szn = b.groupby(['Szn', 'Mgr', 'Pl']).agg(
         Mgr_Starts=('Is_Start', 'sum'),
+        Mgr_Roster_Wks=('Wk', 'count'),
         Mgr_Bench_Wks=('Is_Bench_Clog', 'sum'),
+        Mgr_Starter_Pts=('Pts', lambda s: s[b.loc[s.index, 'Is_Start']].sum()),
         Mgr_Raw_Val=('Wk_Val', 'sum')
     ).reset_index()
+    mgr_szn['Mgr_Pts_Per_Start'] = np.where(mgr_szn['Mgr_Starts'] > 0, mgr_szn['Mgr_Starter_Pts'] / mgr_szn['Mgr_Starts'], 0.0)
 
     d = draft_df.copy()
     d = d.merge(full_szn, left_on=['Year', 'Player'], right_on=['Szn', 'Pl'], how='left')
+    d = d.merge(pos_totals[['Szn', 'Pl', 'Pos_Rank']], left_on=['Year', 'Player'], right_on=['Szn', 'Pl'], how='left')
     d = d.merge(mgr_szn, left_on=['Year', 'Team', 'Player'], right_on=['Szn', 'Mgr', 'Pl'], how='left')
 
-    for col in ['Total_Starts', 'Bench_Wks', 'Starter_Pts', 'Full_Raw_Val', 'Mgr_Starts', 'Mgr_Bench_Wks', 'Mgr_Raw_Val']:
+    for col in [
+        'Total_Starts', 'Total_Roster_Wks', 'Bench_Wks', 'Starter_Pts', 'Full_Raw_Val',
+        'Pts_Per_Start', 'Mgr_Starts', 'Mgr_Roster_Wks', 'Mgr_Bench_Wks', 'Mgr_Starter_Pts',
+        'Mgr_Raw_Val', 'Mgr_Pts_Per_Start'
+    ]:
         d[col] = d[col].fillna(0.0)
+    d['Pos_Rank'] = d['Pos_Rank'].fillna('-')
 
     max_szn_wks = b.groupby('Szn')['Wk'].max().to_dict()
     def get_szn_scale(yr):
@@ -100,8 +165,18 @@ def compute_draft_value_added(draft_df, box_df):
         axis=1
     )
 
+    def calc_mgr_dva(r):
+        szn_wks = float(max_szn_wks.get(int(r['Year']), 16))
+        tot_w = float(r['Total_Roster_Wks'])
+        mgr_w = float(r['Mgr_Roster_Wks'])
+        other_w = tot_w - mgr_w
+        if other_w > 0 and mgr_w > 0 and szn_wks > 0:
+            share = min(1.0, mgr_w / max(tot_w, szn_wks))
+            return float(r['Mgr_Raw_Val']) - (float(r['Expected_Val']) * share)
+        return float(r['Mgr_Raw_Val']) - float(r['Expected_Val'])
+
     d['Pick_DVA'] = d['Full_Raw_Val'] - d['Expected_Val']
-    d['Manager_DVA'] = d['Mgr_Raw_Val'] - d['Expected_Val']
+    d['Manager_DVA'] = d.apply(calc_mgr_dva, axis=1)
     return d
 
 @st.cache_data(ttl=600)
@@ -115,6 +190,11 @@ def compute_waiver_value_added(tx_df, box_df):
     if adds.empty:
         return pd.DataFrame()
 
+    b_dedup = b.sort_values('Is_Start', ascending=False).drop_duplicates(subset=['Szn', 'Wk', 'Pl'])
+    szn_pos_rk = b_dedup.groupby(['Szn', 'Pos', 'Pl'])['Pts'].sum().reset_index()
+    szn_pos_rk['Rk'] = szn_pos_rk.groupby(['Szn', 'Pos'])['Pts'].rank(ascending=False, method='min').astype(int)
+    pos_rk_map = {(int(r['Szn']), str(r['Pl'])): f"{r['Pos']}{int(r['Rk'])}" for _, r in szn_pos_rk[szn_pos_rk['Pts'] > 0].iterrows()}
+
     b_idx = {k: grp.sort_values('Wk') for k, grp in b.groupby(['Szn', 'Mgr', 'Pl'])}
     out_moves = tx_df[(tx_df['Status'] == 'EXECUTED') & (tx_df['Action'].isin(['DROP', 'TRADE']))].copy()
     out_idx = {k: sorted(grp['Week'].tolist()) for k, grp in out_moves.groupby(['Season', 'From_Team', 'Player'])}
@@ -123,7 +203,7 @@ def compute_waiver_value_added(tx_df, box_df):
     for _, r in adds.iterrows():
         szn = int(r['Season'])
         wk_add = int(r['Week'])
-        mgr = str(r['To_Team']).strip()
+        mgr = map_team_to_mgr(r['To_Team'])
         pl = str(r['Player']).strip()
         pos = str(r['Position']).strip()
         tx_type = str(r['Type']).strip()
@@ -138,9 +218,15 @@ def compute_waiver_value_added(tx_df, box_df):
             starts = int(stint['Is_Start'].sum())
             bench_wks = int(stint['Is_Bench_Clog'].sum())
             start_pts = float(stint[stint['Is_Start']]['Pts'].sum())
+            pts_per_start = (start_pts / starts) if starts > 0 else 0.0
             raw_val = float(stint['Wk_Val'].sum())
+            if starts > 0:
+                avg_wk_rk = int(round(stint[stint['Is_Start']]['Wk_Pos_Rk'].mean()))
+                pos_rk_str = f"{pos}{avg_wk_rk}"
+            else:
+                pos_rk_str = pos_rk_map.get((szn, pl), '-')
         else:
-            starts, bench_wks, start_pts, raw_val = 0, 0, 0.0, 0.0
+            starts, bench_wks, start_pts, pts_per_start, raw_val, pos_rk_str = 0, 0, 0.0, 0.0, 0.0, '-'
 
         if tx_type == 'FREEAGENT':
             hurdle = 0.0
@@ -164,6 +250,8 @@ def compute_waiver_value_added(tx_df, box_df):
             'Bid_Amount': bid,
             'Starts': starts,
             'Bench_Wks': bench_wks,
+            'Pts_Per_Start': round(pts_per_start, 1),
+            'Pos_Rank': pos_rk_str,
             'Starter_Pts': round(start_pts, 1),
             'Hurdle': round(hurdle, 1),
             'WVA': round(wva, 2)
@@ -187,38 +275,52 @@ def compute_trade_value_added(trades_df, box_df):
             part = part.strip()
             if '(' in part and part.endswith(')'):
                 p_name = part[:part.rfind('(')].strip()
-                items.append(p_name)
+                p_pos = part[part.rfind('(')+1:-1].strip()
+                items.append((p_name, p_pos))
             elif part:
-                items.append(part)
+                items.append((part, ''))
         return items
+
+    def eval_side(szn, wk, mgr, player_tuples):
+        tot_val, tot_starts, tot_start_pts = 0.0, 0, 0.0
+        enriched_labels = []
+        for p, pos in player_tuples:
+            logs = b_idx.get((szn, mgr, p))
+            if logs is not None and not logs.empty:
+                post = logs[logs['Wk'] >= wk]
+                st_rows = post[post['Is_Start']]
+                starts = len(st_rows)
+                s_pts = float(st_rows['Pts'].sum())
+                val = float(post['Wk_Val'].sum())
+                tot_val += val
+                tot_starts += starts
+                tot_start_pts += s_pts
+                if starts > 0:
+                    pps = s_pts / starts
+                    avg_rk = int(round(st_rows['Wk_Pos_Rk'].mean()))
+                    rk_lbl = f"{pos or post['Pos'].iloc[0]}{avg_rk}"
+                    enriched_labels.append(f"{p} ({starts} GS, {pps:.1f} Pts/Start, {rk_lbl})")
+                else:
+                    enriched_labels.append(f"{p} (0 GS)")
+            else:
+                enriched_labels.append(f"{p} ({pos})" if pos else p)
+        side_pps = (tot_start_pts / tot_starts) if tot_starts > 0 else 0.0
+        return tot_val, tot_starts, side_pps, ", ".join(enriched_labels)
 
     rows = []
     for _, r in trades_df.iterrows():
         szn = int(r['Season'])
         wk = int(r['Week'])
-        m1 = str(r['Manager 1']).strip()
-        m2 = str(r['Manager 2']).strip()
-        m1_players = parse_side(r['Manager 1 Receives'])
-        m2_players = parse_side(r['Manager 2 Receives'])
+        m1 = map_team_to_mgr(r['Manager 1'])
+        m2 = map_team_to_mgr(r['Manager 2'])
+        m1_tuples = parse_side(r['Manager 1 Receives'])
+        m2_tuples = parse_side(r['Manager 2 Receives'])
 
-        m1_val, m1_starts = 0.0, 0
-        for p in m1_players:
-            logs = b_idx.get((szn, m1, p))
-            if logs is not None:
-                post = logs[logs['Wk'] >= wk]
-                m1_val += float(post['Wk_Val'].sum())
-                m1_starts += int(post['Is_Start'].sum())
-
-        m2_val, m2_starts = 0.0, 0
-        for p in m2_players:
-            logs = b_idx.get((szn, m2, p))
-            if logs is not None:
-                post = logs[logs['Wk'] >= wk]
-                m2_val += float(post['Wk_Val'].sum())
-                m2_starts += int(post['Is_Start'].sum())
+        m1_val, m1_starts, m1_pps, m1_detail = eval_side(szn, wk, m1, m1_tuples)
+        m2_val, m2_starts, m2_pps, m2_detail = eval_side(szn, wk, m2, m2_tuples)
 
         rem_wks = max(1, min(6, max_wk_map.get(szn, 16) - wk + 1))
-        diff_players = len(m1_players) - len(m2_players)
+        diff_players = len(m1_tuples) - len(m2_tuples)
         m1_spot_tax = max(0, diff_players) * ROSTER_SPOT_TAX_PER_WK * (rem_wks / 2.0)
         m2_spot_tax = max(0, -diff_players) * ROSTER_SPOT_TAX_PER_WK * (rem_wks / 2.0)
 
@@ -240,13 +342,15 @@ def compute_trade_value_added(trades_df, box_df):
             'Season': szn,
             'Week': wk,
             'Manager 1': m1,
-            'Manager 1 Receives': r['Manager 1 Receives'],
+            'Manager 1 Receives': m1_detail,
             'M1_Starts': m1_starts,
+            'M1_PPS': round(m1_pps, 1),
             'M1_Val': round(m1_adj, 1),
             'M1_TVA': round(net_m1, 1),
             'Manager 2': m2,
-            'Manager 2 Receives': r['Manager 2 Receives'],
+            'Manager 2 Receives': m2_detail,
             'M2_Starts': m2_starts,
+            'M2_PPS': round(m2_pps, 1),
             'M2_Val': round(m2_adj, 1),
             'M2_TVA': round(-net_m1, 1),
             'Trade Winner': winner,
@@ -254,4 +358,4 @@ def compute_trade_value_added(trades_df, box_df):
         })
 
     return pd.DataFrame(rows)
-  
+    
