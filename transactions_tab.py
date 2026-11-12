@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import value_engine
 
 AUSTIN_2018_TX_IDS = {
     '07665c7b-31c1-3522-becc-c8dbf658c6de', '1e73b042-7f5b-3a4b-b80f-9d36e5fce067',
@@ -44,6 +45,11 @@ def render_table(df, left_align_cols=None, highlight_fn=None):
         {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
     ]).to_html()
     st.markdown(styled_html, unsafe_allow_html=True)
+
+def fmt_signed(val):
+    if pd.isna(val):
+        return "-"
+    return f"+{val:.1f}" if val > 0 else f"{val:.1f}"
 
 def clean_2018_rows(df):
     if df.empty or 2018 not in df['Season'].values:
@@ -125,7 +131,6 @@ def load_transactions_data(box_df=None):
     trades_list = []
     seen_trade_pairs = set()
 
-    # 1. Explicit EXECUTED trades from API
     exec_trades = df[(df['Type'] == 'TRADE_ACCEPT') & (df['Status'] == 'EXECUTED') & (df['Action'] == 'TRADE')]
     for tx_id, grp in exec_trades.groupby('Transaction_ID'):
         szn = int(grp['Season'].iloc[0])
@@ -150,7 +155,6 @@ def load_transactions_data(box_df=None):
                 seen_trade_pairs.add((szn, wk, p))
                 seen_trade_pairs.add((szn, wk + 1, p))
 
-    # 2. Backfill redacted trades via week-over-week Box_Scores roster diffs
     if box_df is not None and not box_df.empty:
         name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
         pos_c = 'Position' if 'Position' in box_df.columns else ('Pos' if 'Pos' in box_df.columns else 'Slot')
@@ -221,13 +225,17 @@ def render(box_df=None):
         st.warning("Could not load transaction data. Make sure 'espn_transactions_2019_2026.xlsx' and 'espn_transactions_2018.xlsx' are uploaded to the repository root.")
         return
 
+    wva_df = value_engine.compute_waiver_value_added(df, box_df)
+    tva_df = value_engine.compute_trade_value_added(trades_df, box_df)
+
     tx_view = st.radio(
         "Transactions View:",
         [
             "Manager Activity Leaderboard",
+            "Waiver Value Added (WVA)",
+            "Trade History & Value Added (TVA)",
             "Most Added & Dropped Players",
             "FAAB & Waiver Wire Battles",
-            "Trade History Log",
             "Full Transaction Search"
         ],
         horizontal=True,
@@ -254,6 +262,8 @@ def render(box_df=None):
         sub_adds = adds_df if is_all_time else adds_df[adds_df['Season'] == int(sel_szn)]
         sub_drops = drops_df if is_all_time else drops_df[drops_df['Season'] == int(sel_szn)]
         sub_trades = trades_df if (trades_df.empty or is_all_time) else trades_df[trades_df['Season'] == int(sel_szn)]
+        sub_wva = wva_df if (wva_df.empty or is_all_time) else wva_df[wva_df['Season'] == int(sel_szn)]
+        sub_tva = tva_df if (tva_df.empty or is_all_time) else tva_df[tva_df['Season'] == int(sel_szn)]
 
         rows = []
         for mgr in managers_list:
@@ -270,6 +280,14 @@ def render(box_df=None):
             if not sub_trades.empty:
                 t_cnt = len(sub_trades[(sub_trades['Manager 1'] == mgr) | (sub_trades['Manager 2'] == mgr)])
 
+            tot_wva = sub_wva[sub_wva['Manager'] == mgr]['WVA'].sum() if not sub_wva.empty else 0.0
+            tot_tva = 0.0
+            if not sub_tva.empty:
+                tot_tva = (
+                    sub_tva[sub_tva['Manager 1'] == mgr]['M1_TVA'].sum() +
+                    sub_tva[sub_tva['Manager 2'] == mgr]['M2_TVA'].sum()
+                )
+
             row_dict = {
                 'Manager': mgr,
                 'Total Adds': len(m_adds),
@@ -277,6 +295,8 @@ def render(box_df=None):
                 'Waiver Claims': len(w_adds),
                 'Total Drops': len(m_drops),
                 'Trades Completed': t_cnt,
+                'Waiver Value Added': fmt_signed(tot_wva),
+                'Trade Value Added': fmt_signed(tot_tva)
             }
             if show_faab:
                 faab_col_lbl = 'FAAB Spent (2026+)' if is_all_time else 'FAAB Spent'
@@ -288,14 +308,155 @@ def render(box_df=None):
 
         ldr_df = pd.DataFrame(rows).sort_values('Total Adds', ascending=False).reset_index(drop=True)
         ldr_df['Rank'] = ldr_df.index + 1
-        base_cols = ['Rank', 'Manager', 'Total Adds', 'FA Pickups', 'Waiver Claims', 'Total Drops', 'Trades Completed']
+        base_cols = ['Rank', 'Manager', 'Total Adds', 'FA Pickups', 'Waiver Claims', 'Total Drops', 'Trades Completed', 'Waiver Value Added', 'Trade Value Added']
         if show_faab:
             faab_col_lbl = 'FAAB Spent (2026+)' if is_all_time else 'FAAB Spent'
             max_col_lbl = 'Max Bid (2026+)' if is_all_time else 'Max Bid'
             base_cols += [faab_col_lbl, max_col_lbl]
         render_table(ldr_df[base_cols])
 
-    # ================= VIEW 2: MOST ADDED & DROPPED PLAYERS =================
+    # ================= VIEW 2: WAIVER VALUE ADDED (WVA) =================
+    elif tx_view == "Waiver Value Added (WVA)":
+        st.caption(
+            "**Waiver Value Added (WVA)** measures starter points above positional replacement generated after picking a player up "
+            "(minus -0.5 pt/wk for healthy bench weeks and an acquisition hurdle of 0.0 pts for FA adds, 3.0 pts for pre-2026 priority waivers, and 0.40 pts per $1 of FAAB)."
+        )
+        if wva_df.empty:
+            st.info("Box score data is required to compute Waiver Value Added.")
+            return
+
+        wva_mode = st.radio(
+            "Select WVA View:",
+            [
+                "Best Pickups (Top WVA)",
+                "Worst Pickups & Overpays (Lowest WVA)",
+                "Manager Waiver Efficiency"
+            ],
+            horizontal=True,
+            key="wva_mode_sel"
+        )
+
+        c1, c2, c3 = st.columns(3)
+        sel_szn = c1.selectbox("Season:", [all_time_lbl] + [str(s) for s in seasons_avail], key="wva_szn")
+        sel_pos = c2.selectbox("Position:", ["Skill Players (QB/RB/WR/TE)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="wva_pos")
+        sel_mgr = c3.selectbox("Manager:", ["All Managers"] + managers_list, key="wva_mgr")
+
+        sub = wva_df.copy()
+        if not sel_szn.startswith("All-Time"):
+            sub = sub[sub['Season'] == int(sel_szn)]
+        if sel_pos == "Skill Players (QB/RB/WR/TE)":
+            sub = sub[~sub['Pos'].isin(['D/ST', 'K'])]
+        elif sel_pos != "All Positions":
+            sub = sub[sub['Pos'] == sel_pos]
+        if sel_mgr != "All Managers":
+            sub = sub[sub['Manager'] == sel_mgr]
+
+        if wva_mode in ["Best Pickups (Top WVA)", "Worst Pickups & Overpays (Lowest WVA)"]:
+            asc = (wva_mode == "Worst Pickups & Overpays (Lowest WVA)")
+            ranked = sub.sort_values('WVA', ascending=asc).head(30).reset_index(drop=True)
+            ranked['Rank'] = ranked.index + 1
+            ranked['WVA_Str'] = ranked['WVA'].apply(fmt_signed)
+            ranked['Cost Hurdle'] = ranked['Hurdle'].apply(lambda x: f"{x:.1f}")
+            disp = ranked[['Rank', 'Season', 'Week', 'Manager', 'Player', 'Pos', 'Acquisition', 'Starts', 'Bench_Wks', 'Cost Hurdle', 'WVA_Str']].rename(
+                columns={'Bench_Wks': 'Bench Wks', 'WVA_Str': 'Waiver Value Added'}
+            )
+            render_table(disp, left_align_cols=['Player'])
+        else:
+            m_rows = []
+            for mgr in managers_list:
+                m_sub = sub[sub['Manager'] == mgr]
+                if m_sub.empty:
+                    continue
+                tot_wva = m_sub['WVA'].sum()
+                avg_wva = m_sub['WVA'].mean()
+                starts_gen = int(m_sub['Starts'].sum())
+                best_r = m_sub.loc[m_sub['WVA'].idxmax()]
+                m_rows.append({
+                    'Manager': mgr,
+                    'Pickups': len(m_sub),
+                    'Starts Generated': starts_gen,
+                    'WVA_Num': tot_wva,
+                    'Total WVA': fmt_signed(tot_wva),
+                    'Avg WVA / Pickup': fmt_signed(avg_wva),
+                    'Best Pickup': f"{best_r['Player']} ({int(best_r['Season'])} W{int(best_r['Week'])}, {fmt_signed(best_r['WVA'])})"
+                })
+            m_df = pd.DataFrame(m_rows).sort_values('WVA_Num', ascending=False).reset_index(drop=True)
+            m_df['Rank'] = m_df.index + 1
+            render_table(m_df[['Rank', 'Manager', 'Pickups', 'Starts Generated', 'Total WVA', 'Avg WVA / Pickup', 'Best Pickup']], left_align_cols=['Best Pickup'])
+
+    # ================= VIEW 3: TRADE HISTORY & VALUE ADDED (TVA) =================
+    elif tx_view == "Trade History & Value Added (TVA)":
+        st.caption(
+            "**Trade Value Added (TVA)** compares post-trade starter value over positional replacement generated by each side, "
+            "including a roster-spot consolidation adjustment on uneven trades (2-for-1, 3-for-2)."
+        )
+        t_mode = st.radio(
+            "Select Trade View:",
+            [
+                "Complete Trade Log & TVA Grades",
+                "Most Lopsided Trades (Biggest TVA Swings)",
+                "Manager Trade Value Leaderboard"
+            ],
+            horizontal=True,
+            key="tva_mode_sel"
+        )
+
+        base_t = tva_df if not tva_df.empty else trades_df
+        if base_t.empty:
+            st.info("No trades found.")
+            return
+
+        if t_mode in ["Complete Trade Log & TVA Grades", "Most Lopsided Trades (Biggest TVA Swings)"]:
+            c1, c2 = st.columns(2)
+            t_szn = c1.selectbox("Filter by Season:", ["All Seasons"] + [str(s) for s in sorted(base_t['Season'].unique(), reverse=True)], key="tr_szn")
+            t_mgr = c2.selectbox("Filter by Manager:", ["All Managers"] + managers_list, key="tr_mgr")
+
+            sub_t = base_t.copy()
+            if t_szn != "All Seasons":
+                sub_t = sub_t[sub_t['Season'] == int(t_szn)]
+            if t_mgr != "All Managers":
+                sub_t = sub_t[(sub_t['Manager 1'] == t_mgr) | (sub_t['Manager 2'] == t_mgr)]
+
+            if "Win_Margin" in sub_t.columns:
+                if t_mode == "Most Lopsided Trades (Biggest TVA Swings)":
+                    sub_t = sub_t.sort_values('Win_Margin', ascending=False).head(25).reset_index(drop=True)
+                sub_t['M1 Value'] = sub_t['M1_Val'].apply(fmt_signed)
+                sub_t['M2 Value'] = sub_t['M2_Val'].apply(fmt_signed)
+                render_table(
+                    sub_t[['Season', 'Week', 'Manager 1', 'Manager 1 Receives', 'M1 Value', 'Manager 2', 'Manager 2 Receives', 'M2 Value', 'Trade Winner']],
+                    left_align_cols=['Manager 1 Receives', 'Manager 2 Receives']
+                )
+            else:
+                render_table(
+                    sub_t[['Season', 'Week', 'Manager 1', 'Manager 1 Receives', 'Manager 2', 'Manager 2 Receives']],
+                    left_align_cols=['Manager 1 Receives', 'Manager 2 Receives']
+                )
+        else:
+            if tva_df.empty:
+                st.info("Box score data is required to compute Manager Trade Value Added.")
+            else:
+                tm_rows = []
+                for mgr in managers_list:
+                    m1_sub = tva_df[tva_df['Manager 1'] == mgr]
+                    m2_sub = tva_df[tva_df['Manager 2'] == mgr]
+                    trades_cnt = len(m1_sub) + len(m2_sub)
+                    net_tva = m1_sub['M1_TVA'].sum() + m2_sub['M2_TVA'].sum()
+                    wins = int((m1_sub['M1_TVA'] > 1.0).sum() + (m2_sub['M2_TVA'] > 1.0).sum())
+                    losses = int((m1_sub['M1_TVA'] < -1.0).sum() + (m2_sub['M2_TVA'] < -1.0).sum())
+                    avg_tva = net_tva / trades_cnt if trades_cnt > 0 else 0.0
+                    tm_rows.append({
+                        'Manager': mgr,
+                        'Trades': trades_cnt,
+                        'Trade Record (W-L)': f"{wins}-{losses}",
+                        'TVA_Num': net_tva,
+                        'Net Trade Value Added': fmt_signed(net_tva),
+                        'Avg TVA / Trade': fmt_signed(avg_tva)
+                    })
+                tm_df = pd.DataFrame(tm_rows).sort_values('TVA_Num', ascending=False).reset_index(drop=True)
+                tm_df['Rank'] = tm_df.index + 1
+                render_table(tm_df[['Rank', 'Manager', 'Trades', 'Trade Record (W-L)', 'Net Trade Value Added', 'Avg TVA / Trade']])
+
+    # ================= VIEW 4: MOST ADDED & DROPPED PLAYERS =================
     elif tx_view == "Most Added & Dropped Players":
         c1, c2, c3 = st.columns(3)
         sel_szn = c1.selectbox("Season:", [all_time_lbl] + [str(s) for s in seasons_avail], key="tx_pop_szn")
@@ -324,7 +485,7 @@ def render(box_df=None):
         pop = pop.rename(columns={'Position': 'Pos', 'Count': lbl_cnt, 'Unique_Managers': 'Unique Managers', 'Managers': 'Managers Involved'})
         render_table(pop[['Rank', 'Player', 'Pos', lbl_cnt, 'Unique Managers', 'Managers Involved']], left_align_cols=['Player', 'Managers Involved'])
 
-    # ================= VIEW 3: FAAB & WAIVER WIRE BATTLES =================
+    # ================= VIEW 5: FAAB & WAIVER WIRE BATTLES =================
     elif tx_view == "FAAB & Waiver Wire Battles":
         mode = st.radio(
             "Select Waiver View:",
@@ -424,28 +585,7 @@ def render(box_df=None):
             else:
                 st.info("No contested priority waiver claims found for the selected filter.")
 
-    # ================= VIEW 4: TRADE HISTORY LOG =================
-    elif tx_view == "Trade History Log":
-        st.write(f"#### Complete League Trade History ({min_yr}–{max_yr})")
-        if not trades_df.empty:
-            c1, c2 = st.columns(2)
-            t_szn = c1.selectbox("Filter by Season:", ["All Seasons"] + [str(s) for s in sorted(trades_df['Season'].unique(), reverse=True)], key="tr_szn")
-            t_mgr = c2.selectbox("Filter by Manager:", ["All Managers"] + managers_list, key="tr_mgr")
-
-            sub_t = trades_df.copy()
-            if t_szn != "All Seasons":
-                sub_t = sub_t[sub_t['Season'] == int(t_szn)]
-            if t_mgr != "All Managers":
-                sub_t = sub_t[(sub_t['Manager 1'] == t_mgr) | (sub_t['Manager 2'] == t_mgr)]
-
-            render_table(
-                sub_t[['Season', 'Week', 'Manager 1', 'Manager 1 Receives', 'Manager 2', 'Manager 2 Receives']],
-                left_align_cols=['Manager 1 Receives', 'Manager 2 Receives']
-            )
-        else:
-            st.info("No trades found.")
-
-    # ================= VIEW 5: FULL TRANSACTION SEARCH =================
+    # ================= VIEW 6: FULL TRANSACTION SEARCH =================
     elif tx_view == "Full Transaction Search":
         c1, c2, c3 = st.columns(3)
         s_szn = c1.selectbox("Season:", ["All Seasons"] + [str(s) for s in seasons_avail], key="fs_szn")
