@@ -153,6 +153,13 @@ def fmt_signed(val):
     return f"+{val:.1f}" if val > 0 else f"{val:.1f}"
 
 def render(box_df=None):
+    if box_df is None or box_df.empty:
+        try:
+            import app
+            box_df = app.load_box_scores()
+        except Exception:
+            pass
+
     df = load_draft_data(box_df)
     if df.empty:
         st.warning("Could not load 'Draft History.xlsx' (sheet: 'Consolidated'). Make sure it is uploaded to the repository root.")
@@ -170,7 +177,7 @@ def render(box_df=None):
             "Draft Records & Loyalty"
         ],
         horizontal=True,
-        key="draft_sub_view"
+        key="draft_sub_view_v4"
     )
     st.write("---")
 
@@ -243,7 +250,8 @@ def render(box_df=None):
     elif draft_view == "Draft Value Added (DVA)":
         st.caption(
             "**Draft Value Added (DVA)** measures the actual points a drafted player generates in a starting lineup above a waiver-level replacement at their position "
-            "(minus a -0.5 pt/wk bench clog penalty for healthy bench stashes), minus the expected return of that draft slot."
+            "(minus a -0.5 pt/wk bench clog penalty for healthy bench stashes), minus the expected return of that draft slot. "
+            "**Pick DVA** grades the pick across the full season (scouting accuracy even if traded); **Manager DVA** grades the value produced on the drafting manager's roster (prorated for weeks held)."
         )
         if dva_df.empty:
             st.info("Box score data is required to compute Draft Value Added.")
@@ -280,12 +288,12 @@ def render(box_df=None):
             ranked = sub.sort_values('Pick_DVA', ascending=asc).head(30).reset_index(drop=True)
             ranked['Rank'] = ranked.index + 1
             ranked['Starts'] = ranked['Total_Starts'].astype(int)
-            ranked['Bench Wks'] = ranked['Bench_Wks'].astype(int)
+            ranked['Pts / Start'] = ranked['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
             ranked['Slot Hurdle'] = ranked['Expected_Val'].apply(lambda x: f"{x:.1f}")
             ranked['Pick DVA'] = ranked['Pick_DVA'].apply(fmt_signed)
             ranked['Manager DVA'] = ranked['Manager_DVA'].apply(fmt_signed)
-            disp = ranked[['Rank', 'Year', 'Round', 'Overall Pick', 'Team', 'Player', 'Position', 'Starts', 'Bench Wks', 'Slot Hurdle', 'Pick DVA', 'Manager DVA']].rename(
-                columns={'Overall Pick': 'Pick #', 'Team': 'Drafted By', 'Position': 'Pos'}
+            disp = ranked[['Rank', 'Year', 'Round', 'Overall Pick', 'Team', 'Player', 'Position', 'Starts', 'Pts / Start', 'Pos_Rank', 'Slot Hurdle', 'Pick DVA', 'Manager DVA']].rename(
+                columns={'Overall Pick': 'Pick #', 'Team': 'Drafted By', 'Position': 'Pos', 'Pos_Rank': 'Pos Rank'}
             )
             render_table(disp, left_align_cols=['Player'])
 
@@ -340,9 +348,10 @@ def render(box_df=None):
 
             if 'Pick_DVA' in p_df.columns:
                 p_df['Starts'] = p_df['Total_Starts'].astype(int)
+                p_df['Pts / Start'] = p_df['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
                 p_df['Pick DVA'] = p_df['Pick_DVA'].apply(fmt_signed)
-                disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team', 'Starts', 'Pick DVA']].rename(
-                    columns={'Team': 'Drafted By', 'Round Pick': 'Pick in Rd'}
+                disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team', 'Starts', 'Pts / Start', 'Pos_Rank', 'Pick DVA']].rename(
+                    columns={'Team': 'Drafted By', 'Round Pick': 'Pick in Rd', 'Pos_Rank': 'Pos Rank'}
                 )
             else:
                 disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team']].rename(
@@ -363,8 +372,11 @@ def render(box_df=None):
                 st.write(f"#### {sel_mgr}'s Round 1 History")
                 r1_df = m_df[m_df['Round'] == 1].sort_values('Year', ascending=False).copy()
                 if 'Pick_DVA' in r1_df.columns:
+                    r1_df['Pts / Start'] = r1_df['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
                     r1_df['Pick DVA'] = r1_df['Pick_DVA'].apply(fmt_signed)
-                    r1_disp = r1_df[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Pick DVA']].rename(columns={'Overall Pick': 'Pick #'})
+                    r1_disp = r1_df[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Pts / Start', 'Pos_Rank', 'Pick DVA']].rename(
+                        columns={'Overall Pick': 'Pick #', 'Pos_Rank': 'Pos Rank'}
+                    )
                 else:
                     r1_disp = r1_df[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team']].rename(columns={'Overall Pick': 'Pick #'})
                 render_table(r1_disp, left_align_cols=['Player'])
@@ -400,10 +412,11 @@ def render(box_df=None):
             yr_sub = m_df[m_df['Year'] == int(sel_m_yr)].sort_values('Round').copy()
             if 'Pick_DVA' in yr_sub.columns:
                 yr_sub['Starts'] = yr_sub['Total_Starts'].astype(int)
+                yr_sub['Pts / Start'] = yr_sub['Pts_Per_Start'].apply(lambda x: f"{x:.1f}")
                 yr_sub['Pick DVA'] = yr_sub['Pick_DVA'].apply(fmt_signed)
                 yr_sub['Manager DVA'] = yr_sub['Manager_DVA'].apply(fmt_signed)
-                yr_disp = yr_sub[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Starts', 'Pick DVA', 'Manager DVA']].rename(
-                    columns={'Round Pick': 'Pick in Rd', 'Overall Pick': 'Overall #'}
+                yr_disp = yr_sub[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Starts', 'Pts / Start', 'Pos_Rank', 'Pick DVA', 'Manager DVA']].rename(
+                    columns={'Round Pick': 'Pick in Rd', 'Overall Pick': 'Overall #', 'Pos_Rank': 'Pos Rank'}
                 )
             else:
                 yr_disp = yr_sub[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team']].rename(
