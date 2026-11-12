@@ -118,8 +118,8 @@ def parse_trade_side_players(side_str):
             items.append(part)
     return items
 
-@st.cache_data(ttl=600)
-def compute_draft_value_added(draft_df, box_df, trades_df=None):
+@st.cache_data(ttl=600, show_spinner=False)
+def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=2):
     b = normalize_box_df(box_df)
     if b.empty or draft_df is None or draft_df.empty:
         return pd.DataFrame()
