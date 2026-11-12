@@ -148,10 +148,16 @@ def get_unstarted_defenses(dst_df, name_col):
 # ================= DATA LOADERS =================
 @st.cache_data(ttl=600)
 def load_box_scores():
-    try:
-        return pd.read_excel("espn_fantasy_complete_stats_2017_2026.xlsx", sheet_name="Box_Scores", engine="openpyxl")
-    except Exception:
-        return pd.DataFrame()
+    dfs = []
+    for fname, sname in [
+        ("espn_fantasy_complete_stats_2017_2026.xlsx", "Box_Scores"),
+        ("reconstructed_2018_box_scores.xlsx", "Box_Scores_2018")
+    ]:
+        try:
+            dfs.append(pd.read_excel(fname, sheet_name=sname, engine="openpyxl"))
+        except Exception:
+            pass
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 @st.cache_data(ttl=86400)
 def load_nfl_monday_teams():
@@ -892,7 +898,7 @@ with tab1:
         szn_stats[f'Top {p}'] = szn_stats['Season'].map(top_per_szn[p]).fillna("")
         
     disp_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome', 'Weekly Bags', 'Expected Wins', 'Luck Factor', 'Top QB', 'Top RB', 'Top WR', 'Top TE']
-    hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if str(row.get('Season','')).strip() in ['2017', '2018'] and c in ['Weekly Bags', 'Top QB', 'Top RB', 'Top WR', 'Top TE'] else '' for c in row.index]
+    hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if (str(row.get('Season','')).strip() in ['2017', '2018'] and c == 'Weekly Bags') or (str(row.get('Season','')).strip() == '2017' and c in ['Top QB', 'Top RB', 'Top WR', 'Top TE']) else '' for c in row.index]
     render_html_table(szn_stats[disp_cols].sort_values('Season', ascending=False), highlight_fn=hl_cells)
     
     st.divider()
