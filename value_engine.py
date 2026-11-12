@@ -108,7 +108,18 @@ def compute_weekly_scores(b):
     return b, rep_map
 
 @st.cache_data(ttl=600)
-def compute_draft_value_added(draft_df, box_df):
+def parse_trade_side_players(side_str):
+    items = []
+    for part in str(side_str).split(','):
+        part = part.strip()
+        if '(' in part and part.endswith(')'):
+            items.append(part[:part.rfind('(')].strip())
+        elif part:
+            items.append(part)
+    return items
+
+@st.cache_data(ttl=600)
+def compute_draft_value_added(draft_df, box_df, trades_df=None):
     b = normalize_box_df(box_df)
     if b.empty or draft_df is None or draft_df.empty:
         return pd.DataFrame()
@@ -142,6 +153,7 @@ def compute_draft_value_added(draft_df, box_df):
     mgr_szn['Mgr_Pts_Per_Start'] = np.where(mgr_szn['Mgr_Starts'] > 0, mgr_szn['Mgr_Starter_Pts'] / mgr_szn['Mgr_Starts'], 0.0)
 
     d = draft_df.copy()
+    d['Team'] = d['Team'].apply(map_team_to_mgr)
     d = d.merge(full_szn, left_on=['Year', 'Player'], right_on=['Szn', 'Pl'], how='left')
     d = d.merge(pos_totals[['Szn', 'Pl', 'Pos_Rank']], left_on=['Year', 'Player'], right_on=['Szn', 'Pl'], how='left')
     d = d.merge(mgr_szn, left_on=['Year', 'Team', 'Player'], right_on=['Szn', 'Mgr', 'Pl'], how='left')
@@ -165,20 +177,62 @@ def compute_draft_value_added(draft_df, box_df):
         axis=1
     )
 
-    def calc_mgr_dva(r):
-        szn_wks = float(max_szn_wks.get(int(r['Year']), 16))
-        tot_w = float(r['Total_Roster_Wks'])
-        mgr_w = float(r['Mgr_Roster_Wks'])
-        other_w = tot_w - mgr_w
-        if other_w > 0 and mgr_w > 0 and szn_wks > 0:
-            share = min(1.0, mgr_w / max(tot_w, szn_wks))
-            return float(r['Mgr_Raw_Val']) - (float(r['Expected_Val']) * share)
+    # Allocate post-trade value of acquired players back to the traded draft pick
+    trade_return_map = {}
+    if trades_df is not None and not trades_df.empty:
+        b_idx = {k: grp for k, grp in b.groupby(['Szn', 'Mgr', 'Pl'])}
+        pick_weight_lookup = {
+            (int(r['Year']), str(r['Player']).strip()): max(5.0, float(r['Expected_Val']))
+            for _, r in d.iterrows()
+        }
+
+        t_sorted = trades_df.sort_values(['Season', 'Week'], ascending=[True, True])
+        for _, tr in t_sorted.iterrows():
+            szn = int(tr['Season'])
+            wk = int(tr['Week'])
+            m1 = map_team_to_mgr(tr['Manager 1'])
+            m2 = map_team_to_mgr(tr['Manager 2'])
+            m1_gets = parse_trade_side_players(tr['Manager 1 Receives'])
+            m2_gets = parse_trade_side_players(tr['Manager 2 Receives'])
+
+            m1_in_val = sum(
+                float(b_idx[(szn, m1, p)][b_idx[(szn, m1, p)]['Wk'] >= wk]['Wk_Val'].sum())
+                for p in m1_gets if (szn, m1, p) in b_idx
+            )
+            m2_in_val = sum(
+                float(b_idx[(szn, m2, p)][b_idx[(szn, m2, p)]['Wk'] >= wk]['Wk_Val'].sum())
+                for p in m2_gets if (szn, m2, p) in b_idx
+            )
+
+            rem_wks = max(1, min(6, max_szn_wks.get(szn, 16) - wk + 1))
+            diff_p = len(m1_gets) - len(m2_gets)
+            m1_in_adj = m1_in_val - (max(0, diff_p) * ROSTER_SPOT_TAX_PER_WK * (rem_wks / 2.0))
+            m2_in_adj = m2_in_val - (max(0, -diff_p) * ROSTER_SPOT_TAX_PER_WK * (rem_wks / 2.0))
+
+            if m2_gets:
+                w_m1 = [pick_weight_lookup.get((szn, p), 10.0) for p in m2_gets]
+                tot_w1 = sum(w_m1)
+                for p, w in zip(m2_gets, w_m1):
+                    if (szn, m1, p) not in trade_return_map:
+                        trade_return_map[(szn, m1, p)] = m1_in_adj * (w / tot_w1)
+
+            if m1_gets:
+                w_m2 = [pick_weight_lookup.get((szn, p), 10.0) for p in m1_gets]
+                tot_w2 = sum(w_m2)
+                for p, w in zip(m1_gets, w_m2):
+                    if (szn, m2, p) not in trade_return_map:
+                        trade_return_map[(szn, m2, p)] = m2_in_adj * (w / tot_w2)
+
+    def calc_trade_adj_dva(r):
+        key = (int(r['Year']), str(r['Team']).strip(), str(r['Player']).strip())
+        if key in trade_return_map:
+            return float(r['Mgr_Raw_Val']) + float(trade_return_map[key]) - float(r['Expected_Val'])
         return float(r['Mgr_Raw_Val']) - float(r['Expected_Val'])
 
     d['Pick_DVA'] = d['Full_Raw_Val'] - d['Expected_Val']
-    d['Manager_DVA'] = d.apply(calc_mgr_dva, axis=1)
+    d['Trade_Adj_DVA'] = d.apply(calc_trade_adj_dva, axis=1)
+    d['Manager_DVA'] = d['Trade_Adj_DVA']
     return d
-
 @st.cache_data(ttl=600)
 def compute_waiver_value_added(tx_df, box_df):
     b = normalize_box_df(box_df)
