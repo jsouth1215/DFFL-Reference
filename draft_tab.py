@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import value_engine
 
 NFL_DRAFT_NORM = {
     'ARI': 'ARI', 'Ari': 'ARI', 'ATL': 'ATL', 'Atl': 'ATL',
@@ -146,15 +147,28 @@ def load_draft_data(box_df=None):
     df['Pick_Label'] = df.apply(lambda r: f"{int(r['Round'])}.{int(r['Round Pick']):02d} (#{int(r['Overall Pick'])})", axis=1)
     return df
 
+def fmt_signed(val):
+    if pd.isna(val):
+        return "-"
+    return f"+{val:.1f}" if val > 0 else f"{val:.1f}"
+
 def render(box_df=None):
     df = load_draft_data(box_df)
     if df.empty:
         st.warning("Could not load 'Draft History.xlsx' (sheet: 'Consolidated'). Make sure it is uploaded to the repository root.")
         return
 
+    dva_df = value_engine.compute_draft_value_added(df, box_df)
+
     draft_view = st.radio(
         "Draft View:",
-        ["🏈 Yearly Draft Board", "📋 Player Draft Ledger", "👤 Manager Draft Room", "🏆 Draft Records & Loyalty"],
+        [
+            "Yearly Draft Board",
+            "Draft Value Added (DVA)",
+            "Player Draft Ledger",
+            "Manager Draft Room",
+            "Draft Records & Loyalty"
+        ],
         horizontal=True,
         key="draft_sub_view"
     )
@@ -163,7 +177,7 @@ def render(box_df=None):
     years_avail = sorted(df['Year'].unique().tolist(), reverse=True)
     managers_avail = sorted(df['Team'].unique().tolist())
 
-    if draft_view == "🏈 Yearly Draft Board":
+    if draft_view == "Yearly Draft Board":
         c1, c2 = st.columns([1.5, 4])
         with c1:
             sel_yr = st.selectbox("Select Draft Year:", years_avail, key="db_yr")
@@ -226,12 +240,90 @@ def render(box_df=None):
         )
         st.markdown(board_html, unsafe_allow_html=True)
 
-    elif draft_view == "📋 Player Draft Ledger":
-        all_players = sorted(df['Player'].unique().tolist())
+    elif draft_view == "Draft Value Added (DVA)":
+        st.caption(
+            "**Draft Value Added (DVA)** measures the actual points a drafted player generates in a starting lineup above a waiver-level replacement at their position "
+            "(minus a -0.5 pt/wk bench clog penalty for healthy bench stashes), minus the expected return of that draft slot."
+        )
+        if dva_df.empty:
+            st.info("Box score data is required to compute Draft Value Added.")
+            return
+
+        dva_mode = st.radio(
+            "Select DVA Leaderboard:",
+            [
+                "Biggest Draft Steals (Top Pick DVA)",
+                "Biggest Draft Busts (Lowest Pick DVA)",
+                "Manager Draft Value Leaderboard"
+            ],
+            horizontal=True,
+            key="dva_mode_sel"
+        )
+
+        c1, c2, c3 = st.columns(3)
+        sel_yr = c1.selectbox("Season:", ["All-Time (2018–2026)"] + [str(y) for y in years_avail], key="dva_yr")
+        sel_pos = c2.selectbox("Position:", ["Skill Players (QB/RB/WR/TE)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="dva_pos")
+        sel_mgr = c3.selectbox("Manager:", ["All Managers"] + managers_avail, key="dva_mgr")
+
+        sub = dva_df.copy()
+        if not sel_yr.startswith("All-Time"):
+            sub = sub[sub['Year'] == int(sel_yr)]
+        if sel_pos == "Skill Players (QB/RB/WR/TE)":
+            sub = sub[~sub['Position'].isin(['D/ST', 'K'])]
+        elif sel_pos != "All Positions":
+            sub = sub[sub['Position'] == sel_pos]
+        if sel_mgr != "All Managers":
+            sub = sub[sub['Team'] == sel_mgr]
+
+        if dva_mode in ["Biggest Draft Steals (Top Pick DVA)", "Biggest Draft Busts (Lowest Pick DVA)"]:
+            asc = (dva_mode == "Biggest Draft Busts (Lowest Pick DVA)")
+            ranked = sub.sort_values('Pick_DVA', ascending=asc).head(30).reset_index(drop=True)
+            ranked['Rank'] = ranked.index + 1
+            ranked['Starts'] = ranked['Total_Starts'].astype(int)
+            ranked['Bench Wks'] = ranked['Bench_Wks'].astype(int)
+            ranked['Slot Hurdle'] = ranked['Expected_Val'].apply(lambda x: f"{x:.1f}")
+            ranked['Pick DVA'] = ranked['Pick_DVA'].apply(fmt_signed)
+            ranked['Manager DVA'] = ranked['Manager_DVA'].apply(fmt_signed)
+            disp = ranked[['Rank', 'Year', 'Round', 'Overall Pick', 'Team', 'Player', 'Position', 'Starts', 'Bench Wks', 'Slot Hurdle', 'Pick DVA', 'Manager DVA']].rename(
+                columns={'Overall Pick': 'Pick #', 'Team': 'Drafted By', 'Position': 'Pos'}
+            )
+            render_table(disp, left_align_cols=['Player'])
+
+        else:
+            mgr_rows = []
+            for mgr in managers_avail:
+                m_sub = sub[sub['Team'] == mgr]
+                if m_sub.empty:
+                    continue
+                tot_pick_dva = m_sub['Pick_DVA'].sum()
+                tot_mgr_dva = m_sub['Manager_DVA'].sum()
+                avg_pick_dva = m_sub['Pick_DVA'].mean()
+                hit_rate = (m_sub['Pick_DVA'] > 0).mean() * 100.0
+                best_row = m_sub.loc[m_sub['Pick_DVA'].idxmax()]
+                worst_row = m_sub.loc[m_sub['Pick_DVA'].idxmin()]
+                mgr_rows.append({
+                    'Manager': mgr,
+                    'Picks': len(m_sub),
+                    'Pick_DVA_Num': tot_pick_dva,
+                    'Total Pick DVA (Scouting)': fmt_signed(tot_pick_dva),
+                    'Realized Manager DVA': fmt_signed(tot_mgr_dva),
+                    'Avg DVA / Pick': fmt_signed(avg_pick_dva),
+                    'Hit Rate (>0 DVA)': f"{hit_rate:.1f}%",
+                    'Best Pick': f"{best_row['Player']} ({int(best_row['Year'])} Rd {int(best_row['Round'])}, {fmt_signed(best_row['Pick_DVA'])})",
+                    'Worst Bust': f"{worst_row['Player']} ({int(worst_row['Year'])} Rd {int(worst_row['Round'])}, {fmt_signed(worst_row['Pick_DVA'])})"
+                })
+            m_df = pd.DataFrame(mgr_rows).sort_values('Pick_DVA_Num', ascending=False).reset_index(drop=True)
+            m_df['Rank'] = m_df.index + 1
+            cols = ['Rank', 'Manager', 'Picks', 'Total Pick DVA (Scouting)', 'Realized Manager DVA', 'Avg DVA / Pick', 'Hit Rate (>0 DVA)', 'Best Pick', 'Worst Bust']
+            render_table(m_df[cols], left_align_cols=['Best Pick', 'Worst Bust'])
+
+    elif draft_view == "Player Draft Ledger":
+        base_df = dva_df if not dva_df.empty else df
+        all_players = sorted(base_df['Player'].unique().tolist())
         default_idx = all_players.index("Christian McCaffrey") if "Christian McCaffrey" in all_players else 0
         sel_player = st.selectbox("Search / Select Player:", all_players, index=default_idx, key="dl_player")
 
-        p_df = df[df['Player'] == sel_player].sort_values('Year', ascending=False).copy()
+        p_df = base_df[base_df['Player'] == sel_player].sort_values('Year', ascending=False).copy()
         if not p_df.empty:
             times_drafted = len(p_df)
             avg_pick = p_df['Overall Pick'].mean()
@@ -246,25 +338,36 @@ def render(box_df=None):
             m3.metric("Highest Pick", f"#{best_pick}")
             m4.metric("Most Drafted By", fav_mgrs)
 
-            disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team']].rename(
-                columns={'Team': 'Drafted By', 'Round Pick': 'Pick in Rd'}
-            )
+            if 'Pick_DVA' in p_df.columns:
+                p_df['Starts'] = p_df['Total_Starts'].astype(int)
+                p_df['Pick DVA'] = p_df['Pick_DVA'].apply(fmt_signed)
+                disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team', 'Starts', 'Pick DVA']].rename(
+                    columns={'Team': 'Drafted By', 'Round Pick': 'Pick in Rd'}
+                )
+            else:
+                disp = p_df[['Year', 'Round', 'Round Pick', 'Overall Pick', 'Team', 'Position', 'NFL Team']].rename(
+                    columns={'Team': 'Drafted By', 'Round Pick': 'Pick in Rd'}
+                )
             render_table(disp)
 
-    elif draft_view == "👤 Manager Draft Room":
+    elif draft_view == "Manager Draft Room":
+        base_df = dva_df if not dva_df.empty else df
         c1, c2 = st.columns(2)
         sel_mgr = c1.selectbox("Select Manager:", managers_avail, key="mdr_mgr")
         sel_m_yr = c2.selectbox("Select Season:", ["All-Time Summary"] + [str(y) for y in years_avail], key="mdr_yr")
 
-        m_df = df[df['Team'] == sel_mgr].copy()
+        m_df = base_df[base_df['Team'] == sel_mgr].copy()
         if sel_m_yr == "All-Time Summary":
             c_left, c_right = st.columns([1.2, 1.8])
             with c_left:
                 st.write(f"#### {sel_mgr}'s Round 1 History")
-                r1_df = m_df[m_df['Round'] == 1].sort_values('Year', ascending=False)[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team']].rename(
-                    columns={'Overall Pick': 'Pick #'}
-                )
-                render_table(r1_df)
+                r1_df = m_df[m_df['Round'] == 1].sort_values('Year', ascending=False).copy()
+                if 'Pick_DVA' in r1_df.columns:
+                    r1_df['Pick DVA'] = r1_df['Pick_DVA'].apply(fmt_signed)
+                    r1_disp = r1_df[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Pick DVA']].rename(columns={'Overall Pick': 'Pick #'})
+                else:
+                    r1_disp = r1_df[['Year', 'Overall Pick', 'Player', 'Position', 'NFL Team']].rename(columns={'Overall Pick': 'Pick #'})
+                render_table(r1_disp, left_align_cols=['Player'])
 
                 st.write("#### Position Breakdown (All Rounds)")
                 pos_agg = m_df.groupby('Position').agg(
@@ -294,12 +397,21 @@ def render(box_df=None):
                     st.info("No players drafted multiple times.")
         else:
             st.write(f"#### {sel_mgr}'s {sel_m_yr} Draft Class")
-            yr_sub = m_df[m_df['Year'] == int(sel_m_yr)].sort_values('Round')[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team']].rename(
-                columns={'Round Pick': 'Pick in Rd', 'Overall Pick': 'Overall #'}
-            )
-            render_table(yr_sub, left_align_cols=['Player'])
+            yr_sub = m_df[m_df['Year'] == int(sel_m_yr)].sort_values('Round').copy()
+            if 'Pick_DVA' in yr_sub.columns:
+                yr_sub['Starts'] = yr_sub['Total_Starts'].astype(int)
+                yr_sub['Pick DVA'] = yr_sub['Pick_DVA'].apply(fmt_signed)
+                yr_sub['Manager DVA'] = yr_sub['Manager_DVA'].apply(fmt_signed)
+                yr_disp = yr_sub[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team', 'Starts', 'Pick DVA', 'Manager DVA']].rename(
+                    columns={'Round Pick': 'Pick in Rd', 'Overall Pick': 'Overall #'}
+                )
+            else:
+                yr_disp = yr_sub[['Round', 'Round Pick', 'Overall Pick', 'Player', 'Position', 'NFL Team']].rename(
+                    columns={'Round Pick': 'Pick in Rd', 'Overall Pick': 'Overall #'}
+                )
+            render_table(yr_disp, left_align_cols=['Player'])
 
-    elif draft_view == "🏆 Draft Records & Loyalty":
+    elif draft_view == "Draft Records & Loyalty":
         rec_mode = st.radio(
             "Select Draft Record:",
             [
