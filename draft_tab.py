@@ -42,6 +42,7 @@ DRAFT_DAY_OVERRIDES = {
     (2023, 'Diontae Johnson'): 'PIT',
     (2023, 'Dalvin Cook'): 'NYJ',
     (2023, 'Gabriel Davis'): 'BUF',
+    (2023, 'Gabe Davis'): 'BUF',
     (2023, 'Hollywood Brown'): 'ARI',
     (2023, 'Antonio Gibson'): 'WAS',
     (2023, 'Van Jefferson'): 'LAR',
@@ -83,7 +84,7 @@ POS_COLORS = {
     'K': ('#efefef', '#444444')
 }
 
-def render_html_table(df, highlight_fn=None, left_align_cols=None):
+def render_table(df, left_align_cols=None, highlight_fn=None):
     if df is None or df.empty:
         return
     styler = df.style.hide(axis='index')
@@ -141,6 +142,9 @@ def render_html_table(df, highlight_fn=None, left_align_cols=None):
         f'<div class="dffl-tbl-wrap">{styled_html}</div>'
     )
     st.markdown(wrapper_html, unsafe_allow_html=True)
+
+render_html_table = render_table
+
 @st.cache_data(ttl=600)
 def load_draft_data(box_df=None):
     try:
@@ -172,7 +176,7 @@ def load_draft_data(box_df=None):
                 raw_t = str(r[nfl_c]).strip()
                 norm_t = NFL_DRAFT_NORM.get(raw_t, raw_t.upper())
                 if norm_t and norm_t not in ['FA', 'NONE', '-', 'NAN']:
-                    wk1_lookup[(int(r['Szn_Int']), str(r[name_c]).strip())] = norm_t
+                    wk1_lookup[(int(r['Szn_Int']), value_engine.normalize_player_name(r[name_c]))] = norm_t
 
     def resolve_nfl(row):
         key = (int(row['Year']), str(row['Player']))
@@ -293,7 +297,7 @@ def render(box_df=None):
             rows_html.append(f'<tr>{cells}</tr>')
 
         board_html = (
-            '<div style="overflow-x: auto; margin-top: 10px;">'
+            '<div style="overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px;">'
             f'<table style="width: 100%; border-collapse: collapse;"><thead><tr>{header_cells}</tr></thead>'
             f'<tbody>{"".join(rows_html)}</tbody></table></div>'
         )
@@ -317,7 +321,7 @@ def render(box_df=None):
                 "Manager Draft Value Leaderboard"
             ],
             horizontal=True,
-            key="dva_mode_sel_v7"
+            key="dva_mode_sel_v8"
         )
 
         c1, c2, c3 = st.columns(3)
@@ -381,186 +385,6 @@ def render(box_df=None):
             m_df['Rank'] = m_df.index + 1
             cols = ['Rank', 'Manager', 'Picks', 'Total Pick DVA', 'Total Trade-Adj DVA', 'Avg Pick DVA', 'Hit Rate (>0 DVA)', 'Best Pick', 'Worst Bust']
             render_table(m_df[cols], left_align_cols=['Best Pick', 'Worst Bust'])
-
-    elif draft_view == "Player Draft Ledger":
-        b_norm = value_engine.normalize_box_df(box_df)
-        b_scored, _ = value_engine.compute_weekly_scores(b_norm)
-
-        draft_players = set(df['Player'].dropna().unique()) if not df.empty else set()
-        box_players = set(b_scored['Pl'].dropna().unique()) if not b_scored.empty else set()
-        tx_players = set(tx_df['Player'].dropna().unique()) if not tx_df.empty else set()
-        all_players = sorted([p for p in (draft_players | box_players | tx_players) if p and p != '(Redacted / Empty)'])
-
-        default_idx = all_players.index("Christian McCaffrey") if "Christian McCaffrey" in all_players else 0
-        sel_player = st.selectbox("Search / Select Player (All-Time DFFL Database):", all_players, index=default_idx, key="dl_player_full")
-
-        p_draft = (dva_df[dva_df['Player'] == sel_player] if not dva_df.empty else df[df['Player'] == sel_player]).sort_values('Year', ascending=False).copy()
-        p_box = b_scored[b_scored['Pl'] == sel_player].copy() if not b_scored.empty else pd.DataFrame()
-        p_tx = tx_df[(tx_df['Player'] == sel_player) & (tx_df['Status'] == 'EXECUTED') & (tx_df['Action'].isin(['ADD', 'DROP', 'TRADE']))].copy() if not tx_df.empty else pd.DataFrame()
-        p_trades = trades_df[
-            trades_df['Manager 1 Receives'].astype(str).str.contains(sel_player, regex=False, na=False) |
-            trades_df['Manager 2 Receives'].astype(str).str.contains(sel_player, regex=False, na=False)
-        ].copy() if not trades_df.empty else pd.DataFrame()
-
-        p_starts = p_box[p_box['Is_Start']] if not p_box.empty else pd.DataFrame()
-        tot_starts = len(p_starts)
-        tot_start_pts = p_starts['Pts'].sum() if not p_starts.empty else 0.0
-        career_pps = (tot_start_pts / tot_starts) if tot_starts > 0 else 0.0
-        tot_bench_wks = int((~p_box['Is_Start']).sum()) if not p_box.empty else 0
-        career_vor = p_box['Wk_Val'].sum() if not p_box.empty else 0.0
-
-        times_drafted = len(p_draft)
-        adp_str = f"#{p_draft['Overall Pick'].mean():.1f}" if times_drafted > 0 else "Undrafted"
-        adds_cnt = len(p_tx[p_tx['Action'] == 'ADD']) if not p_tx.empty else 0
-        trades_cnt = len(p_trades)
-
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
-        k1.metric("Career Starts (Bench)", f"{tot_starts} ({tot_bench_wks} BE)")
-        k2.metric("Starter Points", f"{tot_start_pts:,.1f}")
-        k3.metric("Career Pts / Start", f"{career_pps:.1f}")
-        k4.metric("Career Value Over Rep", fmt_signed(career_vor))
-        k5.metric("Drafted (ADP)", f"{times_drafted}x ({adp_str})")
-        k6.metric("Adds / Trades", f"{adds_cnt} Adds • {trades_cnt} Trades")
-
-        st.write("---")
-
-        st.write(f"#### {sel_player} — Season-by-Season Summary")
-        szn_set = sorted(
-            list(set(p_draft['Year'].unique().tolist() if not p_draft.empty else []) |
-                 set(p_box['Szn'].unique().tolist() if not p_box.empty else [])),
-            reverse=True
-        )
-
-        pos_rk_lookup = {}
-        if not b_scored.empty:
-            b_dedup = b_scored.sort_values('Is_Start', ascending=False).drop_duplicates(subset=['Szn', 'Wk', 'Pl'])
-            pt_agg = b_dedup.groupby(['Szn', 'Pos', 'Pl'])['Pts'].sum().reset_index()
-            pt_agg['Rk'] = pt_agg.groupby(['Szn', 'Pos'])['Pts'].rank(ascending=False, method='min').astype(int)
-            for _, r in pt_agg[pt_agg['Pts'] > 0].iterrows():
-                pos_rk_lookup[(int(r['Szn']), str(r['Pl']))] = f"{r['Pos']}{int(r['Rk'])}"
-
-        szn_rows = []
-        for syr in szn_set:
-            d_row = p_draft[p_draft['Year'] == syr].iloc[0] if (not p_draft.empty and syr in p_draft['Year'].values) else None
-            b_szn = p_box[p_box['Szn'] == syr] if not p_box.empty else pd.DataFrame()
-            b_st = b_szn[b_szn['Is_Start']] if not b_szn.empty else pd.DataFrame()
-
-            draft_str = f"Rd {int(d_row['Round'])}, #{int(d_row['Overall Pick'])} ({d_row['Team']})" if d_row is not None else "Undrafted (FA/Waivers)"
-            pick_dva_str = fmt_signed(d_row['Pick_DVA']) if (d_row is not None and 'Pick_DVA' in d_row) else "-"
-            tr_dva_str = fmt_signed(d_row['Trade_Adj_DVA']) if (d_row is not None and 'Trade_Adj_DVA' in d_row) else "-"
-
-            s_cnt = len(b_st)
-            be_cnt = int((~b_szn['Is_Start']).sum()) if not b_szn.empty else 0
-            s_pts = b_st['Pts'].sum() if not b_st.empty else 0.0
-            pps = (s_pts / s_cnt) if s_cnt > 0 else 0.0
-            s_vor = b_szn['Wk_Val'].sum() if not b_szn.empty else 0.0
-            pos_rk = pos_rk_lookup.get((int(syr), sel_player), d_row['Pos_Rank'] if (d_row is not None and 'Pos_Rank' in d_row) else "-")
-
-            if not b_st.empty:
-                m_bd = [f"{m} ({len(g)} GS, {g['Pts'].sum():.1f} pts)" for m, g in b_st.groupby('Mgr')]
-                mgrs_started_str = ", ".join(m_bd)
-            elif not b_szn.empty:
-                m_be = sorted(b_szn['Mgr'].unique().tolist())
-                mgrs_started_str = f"Bench only ({', '.join(m_be)})"
-            else:
-                mgrs_started_str = "-"
-
-            szn_rows.append({
-                'Season': syr,
-                'Draft Status': draft_str,
-                'Pos Rank': pos_rk,
-                'Starts': s_cnt,
-                'Bench Wks': be_cnt,
-                'Starter Pts': f"{s_pts:.1f}",
-                'Pts / Start': f"{pps:.1f}",
-                'Lineup VOR': fmt_signed(s_vor),
-                'Pick DVA': pick_dva_str,
-                'Trade-Adj DVA': tr_dva_str,
-                'Managers Started For': mgrs_started_str
-            })
-
-        if szn_rows:
-            render_table(pd.DataFrame(szn_rows), left_align_cols=['Draft Status', 'Managers Started For'])
-
-        c_left, c_right = st.columns([1.15, 1.85])
-        with c_left:
-            st.write("#### Production by DFFL Manager")
-            if not p_box.empty:
-                m_rows = []
-                for mgr, grp in p_box.groupby('Mgr'):
-                    st_g = grp[grp['Is_Start']]
-                    gs = len(st_g)
-                    be = len(grp) - gs
-                    pts = st_g['Pts'].sum()
-                    pps = (pts / gs) if gs > 0 else 0.0
-                    vor = grp['Wk_Val'].sum()
-                    szns_str = ", ".join(str(y) for y in sorted(grp['Szn'].unique(), reverse=True))
-                    m_rows.append({
-                        'Manager': mgr,
-                        'Starts': gs,
-                        'Bench Wks': be,
-                        'Pts_Num': pts,
-                        'Starter Pts': f"{pts:.1f}",
-                        'Pts / Start': f"{pps:.1f}",
-                        'Value Over Rep': fmt_signed(vor),
-                        'Seasons': szns_str
-                    })
-                m_df = pd.DataFrame(m_rows).sort_values(['Pts_Num', 'Starts'], ascending=[False, False]).reset_index(drop=True)
-                render_table(m_df[['Manager', 'Starts', 'Bench Wks', 'Starter Pts', 'Pts / Start', 'Value Over Rep', 'Seasons']], left_align_cols=['Seasons'])
-            else:
-                st.info("No box score appearances recorded.")
-
-        with c_right:
-            st.write("#### Complete Transaction & Trade Log")
-            tx_events = []
-            if not p_tx.empty:
-                for _, r in p_tx[p_tx['Action'].isin(['ADD', 'DROP'])].iterrows():
-                    szn = int(r['Season'])
-                    wk = int(r['Week'])
-                    act = str(r['Action'])
-                    tx_t = str(r['Type'])
-                    bid = int(r['Bid_Amount'])
-                    if act == 'ADD':
-                        mgr = value_engine.map_team_to_mgr(r['To_Team'])
-                        acq_type = f"FAAB Waiver (${bid})" if (szn >= 2026 and tx_t == 'WAIVER') else ("Priority Waiver" if tx_t == 'WAIVER' else "Free Agent Add")
-                        detail = f"Added by {mgr}"
-                    else:
-                        mgr = value_engine.map_team_to_mgr(r['From_Team'])
-                        acq_type = "Dropped"
-                        detail = f"Dropped by {mgr}"
-                    tx_events.append({
-                        'Season': szn,
-                        'Week': wk,
-                        'Move Type': acq_type,
-                        'Manager(s)': mgr,
-                        'Transaction Details': detail
-                    })
-
-            if not p_trades.empty:
-                for _, tr in p_trades.iterrows():
-                    szn = int(tr['Season'])
-                    wk = int(tr['Week'])
-                    m1 = value_engine.map_team_to_mgr(tr['Manager 1'])
-                    m2 = value_engine.map_team_to_mgr(tr['Manager 2'])
-                    m1_rec = str(tr['Manager 1 Receives'])
-                    m2_rec = str(tr['Manager 2 Receives'])
-                    if sel_player in m1_rec:
-                        from_m, to_m = m2, m1
-                    else:
-                        from_m, to_m = m1, m2
-                    tx_events.append({
-                        'Season': szn,
-                        'Week': wk,
-                        'Move Type': 'Trade',
-                        'Manager(s)': f"{from_m} → {to_m}",
-                        'Transaction Details': f"{m1} gets: {m1_rec}  |  {m2} gets: {m2_rec}"
-                    })
-
-            if tx_events:
-                tx_ev_df = pd.DataFrame(tx_events).sort_values(['Season', 'Week'], ascending=[False, False]).reset_index(drop=True)
-                render_table(tx_ev_df[['Season', 'Week', 'Move Type', 'Manager(s)', 'Transaction Details']], left_align_cols=['Transaction Details'])
-            else:
-                st.info("No waiver adds, drops, or trades recorded for this player.")
 
     elif draft_view == "Manager Draft Room":
         base_df = dva_df if not dva_df.empty else df
