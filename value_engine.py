@@ -224,7 +224,7 @@ def normalize_box_df(box_df):
     b['Pos'] = b[pos_c].astype(str).str.strip()
     b['Slot_Clean'] = b[slot_c].astype(str).str.strip().str.upper()
     b['Pts'] = pd.to_numeric(b[pts_c], errors='coerce').fillna(0.0)
-    b = b[(b['Szn'] >= 2018) & (b['Wk'] >= 1)].copy()
+    b = b[(b['Szn'] >= 2017) & (b['Wk'] >= 1)].copy()
     return b[['Szn', 'Wk', 'Mgr', 'Pl', 'Pos', 'Slot_Clean', 'Pts']]
 
 def compute_weekly_scores(b):
