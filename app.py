@@ -465,7 +465,8 @@ def load_data():
     games['Season_Num'] = pd.to_numeric(games['Season'], errors='coerce')
     games['Week_Num'] = pd.to_numeric(games['Week'], errors='coerce')
     max_scores = games.groupby(['Season', 'Week'])['Actual_Points'].transform('max')
-    games['Is_High_Scorer'] = (games['Actual_Points'] == max_scores) & (games['Season_Num'] >= 2019)
+    games['Is_Weekly_First'] = (games['Actual_Points'] == max_scores) & (games['Actual_Points'] > 0)
+    games['Is_High_Scorer'] = games['Is_Weekly_First'] & (games['Season_Num'] >= 2019)
     return games
 
 def get_detailed_streaks(mgr_df):
@@ -899,6 +900,37 @@ completed_playoff_seasons = set(
 )
 rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
 
+# ================= DEEP-LINK BOX SCORE ROUTER =================
+import streamlit.components.v1 as components
+from urllib.parse import quote
+
+def make_box_link(label, szn, wk, tm):
+    s_clean = str(szn).replace('.0', '').strip()
+    w_clean = int(float(wk))
+    t_clean = quote(str(tm).strip())
+    return f'<a href="?box_szn={s_clean}&box_wk={w_clean}&box_tm={t_clean}" target="_self" style="color: #2563eb; text-decoration: underline; font-weight: inherit;">{label}</a>'
+
+_qp = st.query_params
+if "box_szn" in _qp and "box_wk" in _qp and "box_tm" in _qp:
+    _target_szn = str(_qp["box_szn"]).strip()
+    try:
+        _target_wk = int(float(_qp["box_wk"]))
+    except Exception:
+        _target_wk = 1
+    _target_tm = str(_qp["box_tm"]).strip()
+    if _target_szn in seasons_list:
+        st.session_state["b_szn"] = _target_szn
+    st.session_state["b_wk"] = _target_wk
+    st.session_state["b_tm"] = _target_tm
+    st.query_params.clear()
+    components.html(
+        '''<script>
+        const tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+        if (tabs && tabs.length > 2) { tabs[2].click(); }
+        </script>''',
+        height=0,
+    )
+
 # ================= TAB DECLARATIONS =================
 tab1, tab5, tab6, tab2, tab3, tab4, tab_draft, tab_tx, tab_players, tab_player, tab_deadball = st.tabs([
     "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Draft", "Transactions", "Players", "Detailed Player Scoring", "Deadball Era"
@@ -1038,7 +1070,7 @@ with tab1:
 
     szn_stats['Playoff Outcome'] = [get_playoff_outcome(playoffs[playoffs['Season'] == s]) for s in szn_stats['Season']]
     mgr_games['Season_Str'] = mgr_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-    szn_stats['Weekly Bags'] = szn_stats['Season'].map(mgr_games.groupby('Season_Str')['Is_High_Scorer'].sum().to_dict()).fillna(0).astype(int)
+    szn_stats['Weekly Bags'] = szn_stats['Season'].map(mgr_games.groupby('Season_Str')['Is_Weekly_First'].sum().to_dict()).fillna(0).astype(int)
 
     all_reg['Weekly_Rank'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Actual_Points'].rank(ascending=False, method='average')
     all_reg['N_Teams'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Team_Name'].transform('count')
@@ -1060,6 +1092,8 @@ with tab1:
     for p in ['QB', 'RB', 'WR', 'TE']:
         szn_stats[f'Top {p}'] = szn_stats['Season'].map(top_per_szn[p]).fillna("")
 
+    szn_stats['Season_Sort'] = pd.to_numeric(szn_stats['Season'], errors='coerce').fillna(0)
+    szn_stats = szn_stats.sort_values('Season_Sort', ascending=False).reset_index(drop=True)
     disp_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome', 'Weekly Bags', 'Expected Wins', 'Luck Factor', 'Top QB', 'Top RB', 'Top WR', 'Top TE']
     hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if (str(row.get('Season','')).strip() in ['2017', '2018'] and c == 'Weekly Bags') else '' for c in row.index]
     render_html_table(szn_stats[disp_cols], hl_cells)
@@ -1069,13 +1103,11 @@ with tab1:
     po_disp = playoffs.sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).copy()
     if not po_disp.empty:
         po_disp['Season'] = po_disp['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        po_disp['Score'] = po_disp['Actual_Points'].round(1).astype(str) + " - " + po_disp['Opp_Points'].round(1).astype(str)
+        po_disp['Score'] = po_disp.apply(
+            lambda r: make_box_link(f"{float(r['Actual_Points']):.1f} - {float(r['Opp_Points']):.1f}", r['Season'], r['Week'], selected_team),
+            axis=1
+        )
         render_html_table(po_disp[['Season', 'Week', 'Playoff_Round', 'Opponent_Team_Name', 'Result', 'Score']].rename(columns={'Opponent_Team_Name': 'Opponent', 'Playoff_Round': 'Round'}))
-        po_disp['Game_Label'] = po_disp['Season'] + " Week " + po_disp['Week'].astype(str) + " vs " + po_disp['Opponent_Team_Name']
-        vk = st.selectbox("Select Playoff Game to View Box Score:", ["Select..."] + po_disp['Game_Label'].tolist(), key="po_box")
-        if vk != "Select...":
-            row = po_disp[po_disp['Game_Label'] == vk].iloc[0]
-            display_box_score(row['Season'], row['Week'], selected_team, box_df, games)
     else:
         st.write("No playoff appearances on record.")
 
@@ -1103,13 +1135,16 @@ with tab5:
     if not sched.empty:
         sched['Type'] = sched['Game_Type'].map({1: 'Regular Season', 2: 'Playoffs', 3: 'Consolation', 4: 'Playoff Bye'})
         sched['Result'] = sched.apply(lambda x: 'BYE' if x['Game_Type'] == 4 else ('W' if x['W'] else ('L' if x['L'] else 'T')), axis=1)
+        s_str = str(s_szn).replace('.0', '').strip()
         t_col, o_col = f'{s_team} Score', 'Opponent Score'
-        sched[t_col] = sched['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-        sched[o_col] = sched.apply(lambda x: f"{float(x['Opp_Points']):.1f}" if x['Game_Type'] != 4 else "-", axis=1)
+        sched[t_col] = sched.apply(lambda r: make_box_link(f"{float(r['Actual_Points']):.1f}", s_str, r['Week'], s_team), axis=1)
+        sched[o_col] = sched.apply(
+            lambda r: make_box_link(f"{float(r['Opp_Points']):.1f}", s_str, r['Week'], r['Opponent_Team_Name']) if r['Game_Type'] != 4 else "-",
+            axis=1
+        )
         sched['Margin'] = sched.apply(lambda r: "-" if r['Game_Type']==4 else f"{r['Actual_Points']-r['Opp_Points']:+.1f}", axis=1)
         sched['Opponent'] = sched['Opponent_Team_Name']
 
-        s_str = str(s_szn).replace('.0', '').strip()
         sched['Week_Num_Int'] = pd.to_numeric(sched['Week'], errors='coerce').fillna(0).astype(int)
         sched[f'{s_team} Top Scorer'] = sched.apply(lambda r: game_top_map.get((s_str, r['Week_Num_Int'], str(r['Team_Name']).strip()), ""), axis=1)
         sched['Opponent Top Scorer'] = sched.apply(lambda r: game_top_map.get((s_str, r['Week_Num_Int'], str(r['Opponent_Team_Name']).strip()), "") if str(r['Opponent_Team_Name']).upper() != 'BYE' else "", axis=1)
@@ -1117,9 +1152,6 @@ with tab5:
         cols = ['Week', 'Type', 'Opponent', 'Result', t_col, o_col, 'Margin', f'{s_team} Top Scorer', 'Opponent Top Scorer']
         hl = lambda row: ['font-weight: bold;' if (c == t_col and row['Result'] == 'W') or (c == o_col and row['Result'] == 'L') else '' for c in row.index]
         render_html_table(sched[cols], hl)
-
-        vwk = st.selectbox("Select Week to View Box Score:", ["Select..."] + sched['Week'].unique().tolist(), key="sch_box")
-        if vwk != "Select...": display_box_score(s_szn, vwk, s_team, box_df, games)
     else:
         st.write("No schedule found.")
 
@@ -1131,7 +1163,10 @@ with tab6:
         c1, c2, c3 = st.columns(3)
         b_season = c1.selectbox("Season", seasons_list, key="b_szn")
         weeks = sorted(box_df[box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)]['Week'].dropna().unique().tolist())
-        b_week = c2.selectbox("Week", weeks, index=(len(weeks) - 1 if weeks else 0), key="b_wk")
+        if "b_wk" in st.session_state and st.session_state["b_wk"] not in weeks and weeks:
+            st.session_state["b_wk"] = weeks[-1]
+        default_wk_idx = (weeks.index(st.session_state["b_wk"]) if ("b_wk" in st.session_state and st.session_state["b_wk"] in weeks) else (len(weeks) - 1 if weeks else 0))
+        b_week = c2.selectbox("Week", weeks, index=default_wk_idx, key="b_wk")
         avail_teams = sorted(box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)) & (box_df['Week'] == b_week)]['Team_Name'].dropna().unique().tolist())
 
         if "b_tm" in st.session_state and st.session_state["b_tm"] not in avail_teams and avail_teams:
