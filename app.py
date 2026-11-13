@@ -939,7 +939,7 @@ def get_div_and_overall_finish_map(games_df, rs_ranks_df):
                     tm_n = r_d['Team_Name']
                     div_ord = format_ordinal(idx_d + 1)
                     ov_ord = rs_lookup.get((szn_s, tm_n)) or ov_dict.get(tm_n, "")
-                    out_map[(szn_s, tm_n)] = f"{div_ord} in {div_name} ({ov_ord} Overall)"
+                    out_map[(szn_s, tm_n)] = f"{ov_ord} ({div_ord} in {div_name})"
         else:
             for tm_n, ov_ord in ov_dict.items():
                 out_map[(szn_s, tm_n)] = rs_lookup.get((szn_s, tm_n)) or ov_ord
