@@ -6,25 +6,63 @@ import value_engine
 importlib.reload(value_engine)
 
 def render_table(df, left_align_cols=None, highlight_fn=None):
+    if df is None or df.empty:
+        return
     styler = df.style.hide(axis='index')
     styler = styler.set_properties(**{
         'text-align': 'center',
-        'padding': '6px 8px',
-        'border': '1px solid #e6e6e6',
-        'white-space': 'nowrap'
+        'padding': '7px 10px',
+        'border': '1px solid #e2e8f0',
+        'white-space': 'nowrap',
+        'font-size': '13.5px'
     })
     if left_align_cols:
         valid_cols = [c for c in left_align_cols if c in df.columns]
         if valid_cols:
-            styler = styler.set_properties(subset=valid_cols, **{'text-align': 'left'})
+            styler = styler.set_properties(subset=valid_cols, **{
+                'text-align': 'left',
+                'white-space': 'normal',
+                'min-width': '160px',
+                'max-width': '340px',
+                'line-height': '1.35'
+            })
     if highlight_fn:
         styler = styler.apply(highlight_fn, axis=1)
 
     styled_html = styler.set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('padding', '6px 8px'), ('border', '1px solid #e6e6e6'), ('white-space', 'nowrap')]},
-        {'selector': 'table', 'props': [('width', '100%'), ('border-collapse', 'collapse')]}
+        {'selector': 'th', 'props': [
+            ('text-align', 'center'),
+            ('padding', '8px 10px'),
+            ('border', '1px solid #cbd5e1'),
+            ('background-color', '#f8fafc'),
+            ('color', '#0f172a'),
+            ('font-weight', '700'),
+            ('font-size', '13px'),
+            ('white-space', 'nowrap')
+        ]},
+        {'selector': 'tbody tr:nth-child(even)', 'props': [('background-color', '#fcfcfd')]},
+        {'selector': 'table', 'props': [
+            ('width', '100%'),
+            ('border-collapse', 'collapse'),
+            ('margin', '0')
+        ]}
     ]).to_html()
-    st.markdown(styled_html, unsafe_allow_html=True)
+
+    wrapper_html = (
+        "<style>"
+        ".dffl-tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; "
+        "margin: 6px 0 18px 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }"
+        ".dffl-tbl-wrap table { width: 100%; border-collapse: collapse; }"
+        "@media (max-width: 768px) {"
+        "  .dffl-tbl-wrap th, .dffl-tbl-wrap td { padding: 5px 7px !important; font-size: 12px !important; }"
+        "  .dffl-tbl-wrap td:first-child, .dffl-tbl-wrap th:first-child { "
+        "    position: sticky; left: 0; background-color: #f8fafc; z-index: 1; border-right: 2px solid #cbd5e1 !important; "
+        "  }"
+        "}"
+        "</style>"
+        f'<div class="dffl-tbl-wrap">{styled_html}</div>'
+    )
+    st.markdown(wrapper_html, unsafe_allow_html=True)
 
 def fmt_signed(val):
     if pd.isna(val):
