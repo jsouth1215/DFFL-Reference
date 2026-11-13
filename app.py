@@ -1131,7 +1131,7 @@ with tab6:
         c1, c2, c3 = st.columns(3)
         b_season = c1.selectbox("Season", seasons_list, key="b_szn")
         weeks = sorted(box_df[box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)]['Week'].dropna().unique().tolist())
-        b_week = c2.selectbox("Week", weeks, key="b_wk")
+        b_week = c2.selectbox("Week", weeks, index=(len(weeks) - 1 if weeks else 0), key="b_wk")
         avail_teams = sorted(box_df[(box_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == str(b_season)) & (box_df['Week'] == b_week)]['Team_Name'].dropna().unique().tolist())
 
         if "b_tm" in st.session_state and st.session_state["b_tm"] not in avail_teams and avail_teams:
@@ -1145,8 +1145,7 @@ with tab6:
 
         wk_games = games[
             (games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == b_szn_str) &
-            (games['Week_Num'] == b_wk_int) &
-            (games['Team_Name'].str.upper() != 'CAM')
+            (games['Week_Num'] == b_wk_int)
         ].copy()
 
         seen_pairs = set()
@@ -1154,8 +1153,6 @@ with tab6:
         for _, r in wk_games.iterrows():
             t1 = str(r['Team_Name']).strip()
             t2 = str(r['Opponent_Team_Name']).strip()
-            if t2.upper() == 'CAM':
-                continue
             pair_key = tuple(sorted([t1.upper(), t2.upper()]))
             if pair_key in seen_pairs:
                 continue
