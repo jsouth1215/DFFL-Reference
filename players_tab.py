@@ -87,7 +87,7 @@ def render(box_df=None):
             box_df = app.load_box_scores()
         except Exception:
             dfs_b = []
-            for fn, sn in [("espn_fantasy_complete_stats_2017_2026.xlsx", "Box_Scores"), ("reconstructed_2018_box_scores.xlsx", "Box_Scores_2018")]:
+            for fn, sn in [("espn_fantasy_complete_stats_2017_2026.xlsx", "Box_Scores"), ("reconstructed_2018_box_scores.xlsx", "Box_Scores_2018"), ("reconstructed_2017_box_scores.xlsx", "Box_Scores_2017")]:
                 try:
                     dfs_b.append(pd.read_excel(fn, sheet_name=sn, engine="openpyxl"))
                 except Exception:
