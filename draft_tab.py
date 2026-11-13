@@ -147,10 +147,26 @@ render_html_table = render_table
 
 @st.cache_data(ttl=600)
 def load_draft_data(box_df=None):
+    dfs = []
     try:
-        df = pd.read_excel("Draft History.xlsx", sheet_name="Consolidated", header=1, engine="openpyxl")
+        df_main = pd.read_excel("Draft History.xlsx", sheet_name="Consolidated", header=1, engine="openpyxl")
+        dfs.append(df_main)
     except Exception:
+        pass
+
+    try:
+        df_17 = pd.read_excel("reconstructed_2017_box_scores.xlsx", sheet_name="Draft_2017", engine="openpyxl")
+        if not df_17.empty:
+            if dfs and 'Year' in dfs[0].columns:
+                yr_s = pd.to_numeric(dfs[0]['Year'], errors='coerce')
+                dfs[0] = dfs[0][yr_s != 2017].copy()
+            dfs.append(df_17)
+    except Exception:
+        pass
+
+    if not dfs:
         return pd.DataFrame()
+    df = pd.concat(dfs, ignore_index=True)
 
     df = df.dropna(subset=['Year', 'Player']).copy()
     df['Year'] = pd.to_numeric(df['Year'], errors='coerce').astype(int)
@@ -233,7 +249,7 @@ def render(box_df=None):
             "Draft Records & Loyalty"
         ],
         horizontal=True,
-        key="draft_sub_view_v8"
+        key="draft_sub_view_v9"
     )
     st.write("---")
 
@@ -321,11 +337,11 @@ def render(box_df=None):
                 "Manager Draft Value Leaderboard"
             ],
             horizontal=True,
-            key="dva_mode_sel_v8"
+            key="dva_mode_sel_v9"
         )
 
         c1, c2, c3 = st.columns(3)
-        sel_yr = c1.selectbox("Season:", ["All-Time (2018–2026)"] + [str(y) for y in years_avail], key="dva_yr")
+        sel_yr = c1.selectbox("Season:", ["All-Time (2017–2026)"] + [str(y) for y in years_avail], key="dva_yr")
         sel_pos = c2.selectbox("Position:", ["Skill Players (QB/RB/WR/TE)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="dva_pos")
         sel_mgr = c3.selectbox("Manager:", ["All Managers"] + managers_avail, key="dva_mgr")
 
@@ -467,7 +483,7 @@ def render(box_df=None):
         )
 
         if rec_mode == "Manager Draft Loyalty (Same Player 3+ Times)":
-            st.write("#### Players Drafted by the Same Manager 3+ Times (2018–2026)")
+            st.write("#### Players Drafted by the Same Manager 3+ Times (2017–2026)")
             loy = df.groupby(['Team', 'Player']).agg(
                 Pos=('Position', lambda s: s.mode().iloc[0] if not s.mode().empty else ''),
                 Times=('Year', 'count'),
@@ -505,7 +521,7 @@ def render(box_df=None):
             )
 
         elif rec_mode == "All-Time #1 Overall Picks":
-            st.write("#### Every #1 Overall Draft Pick (2018–2026)")
+            st.write("#### Every #1 Overall Draft Pick (2017–2026)")
             p1 = df[df['Overall Pick'] == 1].sort_values('Year', ascending=False)[['Year', 'Team', 'Player', 'Position', 'NFL Team']].rename(
                 columns={'Team': 'Manager'}
             )
