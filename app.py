@@ -1060,7 +1060,7 @@ with tab1:
         szn_stats[f'Top {p}'] = szn_stats['Season'].map(top_per_szn[p]).fillna("")
         
     disp_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome', 'Weekly Bags', 'Expected Wins', 'Luck Factor', 'Top QB', 'Top RB', 'Top WR', 'Top TE']
-    hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if (str(row.get('Season','')).strip() in ['2017', '2018'] and c == 'Weekly Bags') 
+    hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if (str(row.get('Season','')).strip() in ['2017', '2018'] and c == 'Weekly Bags') else '' for c in row.index]
     
     st.divider()
     st.write("### Playoff Game Log")
