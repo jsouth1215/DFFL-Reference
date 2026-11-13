@@ -205,14 +205,14 @@ def load_box_scores():
         pass
 
     try:
-     df_17 = pd.read_excel("reconstructed_2017_box_scores.xlsx", sheet_name="Box_Scores_2017", engine="openpyxl")
-     if not df_17.empty:
-         if dfs:
-             s_str = dfs[0]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-             dfs[0] = dfs[0][s_str != '2017'].copy()
-         dfs.append(df_17)
-     except Exception:
-     pass
+        df_17 = pd.read_excel("reconstructed_2017_box_scores.xlsx", sheet_name="Box_Scores_2017", engine="openpyxl")
+        if not df_17.empty:
+            if dfs:
+                s_str = dfs[0]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                dfs[0] = dfs[0][s_str != '2017'].copy()
+            dfs.append(df_17)
+    except Exception:
+        pass
 
     if not dfs:
         return pd.DataFrame()
