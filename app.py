@@ -5,7 +5,7 @@ import players_tab
 import transactions_tab
 import deadball_tab
 
-st.set_page_config(page_title="DFFL Hub", page_icon="🏈", layout="wide")
+st.set_page_config(page_title="DFFL Reference", page_icon="🏈", layout="wide")
 
 # ================= UI & FORMATTING HELPERS =================
 def render_html_table(df, highlight_fn=None, left_align_cols=None):
@@ -882,7 +882,7 @@ def get_monday_comebacks(box_df, games):
     return pd.DataFrame()
 
 # ================= GLOBAL DATA INITIALIZATION =================
-st.title("🏈 DFFL History Hub")
+st.title("?? DFFL Reference")
 
 games = load_data()
 box_df = load_box_scores()
@@ -901,9 +901,7 @@ completed_playoff_seasons = set(
 rs_ranks_df = load_rs_rankings("FantasyOddsModel2026-v1_2.xlsb", teams, games)
 
 # ================= DEEP-LINK BOX SCORE ROUTER =================
-import streamlit.components.v1 as components
 from urllib.parse import quote
-import time
 
 def make_box_link(label, szn, wk, tm):
     s_clean = str(szn).replace('.0', '').strip()
@@ -923,16 +921,31 @@ if "box_szn" in _qp and "box_wk" in _qp and "box_tm" in _qp:
         st.session_state["b_szn"] = _target_szn
     st.session_state["b_wk"] = _target_wk
     st.session_state["b_tm"] = _target_tm
-    st.session_state["_jump_to_box_tab"] = str(time.time())
+    st.session_state["main_nav_tab"] = "Box Scores"
     st.query_params.clear()
+    st.rerun()
 
 # ================= TAB DECLARATIONS =================
-tab1, tab5, tab6, tab2, tab3, tab4, tab_draft, tab_tx, tab_players, tab_player, tab_deadball = st.tabs([
-    "Franchise", "Schedule", "Box Scores", "Matchups", "Standings", "Records", "Draft", "Transactions", "Players", "Detailed Player Scoring", "Deadball Era"
-])
+NAV_TABS = [
+    "Franchise", "Schedule", "Box Scores", "Matchups", "Standings",
+    "Records", "Draft", "Transactions", "Players", "Detailed Player Scoring", "Deadball Era"
+]
+if "main_nav_tab" not in st.session_state or st.session_state["main_nav_tab"] not in NAV_TABS:
+    st.session_state["main_nav_tab"] = "Franchise"
+
+st.markdown('''<style>
+div[role="radiogroup"] {
+    gap: 6px;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+</style>''', unsafe_allow_html=True)
+
+active_tab = st.radio("Navigation", NAV_TABS, horizontal=True, label_visibility="collapsed", key="main_nav_tab")
 
 # ================= TAB 1: FRANCHISE =================
-with tab1:
+if active_tab == "Franchise":
     selected_team = st.selectbox("Select Manager", teams, label_visibility="collapsed")
     mgr_games = games[games['Team_Name'] == selected_team].sort_values(['Season_Num', 'Week_Num']).copy()
     mgr_games['Result'] = mgr_games.apply(lambda x: 'W' if x['W'] else ('L' if x['L'] else 'T'), axis=1)
@@ -1131,7 +1144,7 @@ with tab1:
             render_html_table(pd.DataFrame(opp_list).sort_values(['Win_Pct_Raw', 'W', 'GP'], ascending=[False, False, False])[['Opponent', 'GP', 'W', 'L', 'Win %', 'PF', 'PA', 'Playoff Record']])
 
 # ================= TAB 5: SCHEDULE =================
-with tab5:
+elif active_tab == "Schedule":
     c1, c2 = st.columns(2)
     s_szn = c1.selectbox("Season", seasons_list, key='sched_szn')
     s_team = c2.selectbox("Manager", teams, key='sched_team')
@@ -1160,7 +1173,7 @@ with tab5:
         st.write("No schedule found.")
 
 # ================= TAB 6: BOX SCORES =================
-with tab6:
+elif active_tab == "Box Scores":
     if box_df.empty:
         st.warning("Player data not found.")
     else:
@@ -1248,7 +1261,7 @@ with tab6:
             display_box_score(b_season, b_week, b_team, box_df, games)
 
 # ================= TAB 2: MATCHUPS =================
-with tab2:
+elif active_tab == "Matchups":
     c1, c2 = st.columns(2)
     with c1:
         team_a = st.selectbox("Team A", teams)
@@ -1283,7 +1296,7 @@ with tab2:
         st.write("No matchups found between these teams.")
 
 # ================= TAB 3: STANDINGS =================
-with tab3:
+elif active_tab == "Standings":
     sel_szn = st.selectbox("Select Season", seasons_list, key='stnd_szn')
     szn_data = games[(games['Season'] == str(sel_szn)) & (games['Game_Type'] == 1)]
     if not szn_data.empty:
@@ -1341,7 +1354,7 @@ with tab3:
         st.write("No regular season data found.")
 
 # ================= TAB 4: RECORDS =================
-with tab4:
+elif active_tab == "Records":
     rec_categories = {
         "Game Records": [
             "Highest Scoring Weeks",
@@ -2074,7 +2087,7 @@ with tab4:
             st.info("No starter data found for the selected season.")
 
 # ================= TAB 7: DETAILED PLAYER SCORING =================
-with tab_player:
+elif active_tab == "Detailed Player Scoring":
     if box_df.empty:
         st.warning("Player data not found.")
     else:
@@ -2277,42 +2290,18 @@ with tab_player:
         )
 
 # ================= TAB 8: DRAFT =================
-with tab_draft:
+elif active_tab == "Draft":
     draft_tab.render(box_df)
 
 # ================= TAB 9: TRANSACTIONS =================
-with tab_tx:
+elif active_tab == "Transactions":
     transactions_tab.render(box_df)
 
 # ================= TAB 10: PLAYERS =================
-with tab_players:
+elif active_tab == "Players":
     players_tab.render(box_df)
 
 # ================= TAB 11: DEADBALL ERA =================
-with tab_deadball:
+elif active_tab == "Deadball Era":
     deadball_tab.render()
 
-if st.session_state.get("_jump_to_box_tab"):
-    _ts = st.session_state.pop("_jump_to_box_tab")
-    components.html(
-        f'''<script>
-        // ts={_ts}
-        (function() {{
-            var attempts = 0;
-            var timer = setInterval(function() {{
-                attempts++;
-                var tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
-                for (var i = 0; i < tabs.length; i++) {{
-                    if (tabs[i].innerText && tabs[i].innerText.trim() === "Box Scores") {{
-                        tabs[i].click();
-                        window.parent.scrollTo({{top: 0, behavior: 'smooth'}});
-                        clearInterval(timer);
-                        return;
-                    }}
-                }}
-                if (attempts > 30) clearInterval(timer);
-            }}, 60);
-        }})();
-        </script>''',
-        height=0,
-    )
