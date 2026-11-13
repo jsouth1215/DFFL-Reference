@@ -5,6 +5,15 @@ import numpy as np
 import value_engine
 importlib.reload(value_engine)
 
+POS_COLORS = {
+    'RB': ('#cfe2f3', '#0b5394'),
+    'WR': ('#d9ead3', '#274e13'),
+    'QB': ('#f4cccc', '#783f04'),
+    'TE': ('#fce5cd', '#b45f06'),
+    'D/ST': ('#d9d2e9', '#351c75'),
+    'K': ('#efefef', '#444444')
+}
+
 def render_table(df, left_align_cols=None, highlight_fn=None):
     if df is None or df.empty:
         return
@@ -64,6 +73,8 @@ def render_table(df, left_align_cols=None, highlight_fn=None):
     )
     st.markdown(wrapper_html, unsafe_allow_html=True)
 
+render_html_table = render_table
+
 def fmt_signed(val):
     if pd.isna(val):
         return "-"
@@ -121,19 +132,19 @@ def render(box_df=None):
     player_view = st.radio(
         "Players View:",
         [
-            "Player Career Dossier",
+            "NFL Player Profile",
             "All-Time Career Leaders",
             "Single-Season Legends",
             "Weekly Boom Games & Records",
             "Player-Manager Connection"
         ],
         horizontal=True,
-        key="players_main_view"
+        key="players_main_view_v2"
     )
     st.write("---")
 
-    # ================= VIEW 1: PLAYER CAREER DOSSIER =================
-    if player_view == "Player Career Dossier":
+    # ================= VIEW 1: NFL PLAYER PROFILE =================
+    if player_view == "NFL Player Profile":
         draft_players = set(draft_df['Player'].dropna().unique()) if not draft_df.empty else set()
         box_players = set(b_scored['Pl'].dropna().unique()) if not b_scored.empty else set()
         tx_players = set(tx_df['Player'].dropna().unique()) if not tx_df.empty else set()
@@ -157,23 +168,76 @@ def render(box_df=None):
         tot_bench_wks = int((~p_box['Is_Start']).sum()) if not p_box.empty else 0
         career_val_score = p_box['Wk_Val'].sum() if not p_box.empty else 0.0
 
+        pos_str = p_box['Pos'].mode().iloc[0] if (not p_box.empty and not p_box['Pos'].mode().empty) else (
+            p_draft['Position'].mode().iloc[0] if (not p_draft.empty and not p_draft['Position'].mode().empty) else 'NFL'
+        )
+        pos_bg, pos_fg = POS_COLORS.get(pos_str, ('#e2e8f0', '#1e293b'))
+
         times_drafted = len(p_draft)
-        adp_str = f"#{p_draft['Overall Pick'].mean():.1f}" if times_drafted > 0 else "Undrafted"
+        if times_drafted > 0:
+            adp_val = p_draft['Overall Pick'].mean()
+            best_pick = int(p_draft['Overall Pick'].min())
+            draft_summary_str = f"{times_drafted}x (ADP #{adp_val:.1f}, High #{best_pick})"
+        else:
+            draft_summary_str = "Undrafted"
+
         adds_cnt = len(p_tx[p_tx['Action'] == 'ADD']) if not p_tx.empty else 0
+        drops_cnt = len(p_tx[p_tx['Action'] == 'DROP']) if not p_tx.empty else 0
         trades_cnt = len(p_trades)
 
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
-        k1.metric("Career Starts (Bench)", f"{tot_starts} ({tot_bench_wks} BE)")
-        k2.metric("Starter Points", f"{tot_start_pts:,.1f}")
-        k3.metric("Career Pts / Start", f"{career_pps:.1f}")
-        k4.metric("Career Value Score", fmt_signed(career_val_score))
-        k5.metric("Drafted (ADP)", f"{times_drafted}x ({adp_str})")
-        k6.metric("Adds / Trades", f"{adds_cnt} Adds • {trades_cnt} Trades")
+        if not p_starts.empty:
+            best_row = p_starts.loc[p_starts['Pts'].idxmax()]
+            best_gm_str = f"{best_row['Pts']:.1f} pts ({int(best_row['Szn'])} W{int(best_row['Wk'])}, {best_row['Mgr']})"
+            mgr_pts = p_starts.groupby('Mgr').agg(GS=('Wk', 'count'), Pts=('Pts', 'sum')).sort_values('Pts', ascending=False)
+            top_mgr_str = f"{mgr_pts.index[0]} ({int(mgr_pts.iloc[0]['GS'])} GS, {mgr_pts.iloc[0]['Pts']:,.1f} pts)"
+            uniq_mgrs_started = p_starts['Mgr'].nunique()
+        else:
+            best_gm_str = "N/A"
+            top_mgr_str = "N/A"
+            uniq_mgrs_started = 0
 
-        st.write("---")
+        szn_set = sorted(
+            list(set(p_draft['Year'].unique().tolist() if not p_draft.empty else []) |
+                 set(p_box['Szn'].unique().tolist() if not p_box.empty else [])),
+            reverse=True
+        )
+        best_szn_rk_str = "N/A"
+        best_rk_num = 999
+        for syr in szn_set:
+            rk_lbl = pos_rk_lookup.get((int(syr), sel_player), "-")
+            if rk_lbl != "-":
+                num_part = ''.join(filter(str.isdigit, rk_lbl))
+                if num_part and int(num_part) < best_rk_num:
+                    best_rk_num = int(num_part)
+                    best_szn_rk_str = f"{rk_lbl} ({syr})"
+
+        st.markdown(
+            f"<div style='display:flex; align-items:center; gap:10px; margin: 4px 0 12px 0;'>"
+            f"<span style='font-size:22px; font-weight:800; color:#0f172a;'>{sel_player}</span>"
+            f"<span style='background:{pos_bg}; color:{pos_fg}; padding:3px 9px; border-radius:5px; font-weight:700; font-size:13px;'>{pos_str}</span>"
+            f"<span style='font-size:13px; color:#64748b;'>Active Seasons: {len(szn_set)} ({min(szn_set) if szn_set else '-'}–{max(szn_set) if szn_set else '-'})</span>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"**Career Starts (Bench):** {tot_starts} GS ({tot_bench_wks} BE)")
+            st.markdown(f"**Career Starter Points:** {tot_start_pts:,.1f} ({career_pps:.1f} Pts/Start)")
+            st.markdown(f"**Career Value Score:** {fmt_signed(career_val_score)}")
+        with c2:
+            st.markdown(f"**Peak Season Finish:** {best_szn_rk_str}")
+            st.markdown(f"**Career High Game:** {best_gm_str}")
+            st.markdown(f"**Top DFFL Manager:** {top_mgr_str}")
+        with c3:
+            st.markdown(f"**Draft History:** {draft_summary_str}")
+            st.markdown(f"**Transactions:** {adds_cnt} Adds • {drops_cnt} Drops • {trades_cnt} Trades")
+            st.markdown(f"**Franchises Started For:** {uniq_mgrs_started} Managers")
+
+        st.divider()
 
         dossier_sub = st.radio(
-            "Dossier Section:",
+            "Profile Section:",
             [
                 "Season-by-Season & Manager Breakdown",
                 "Draft & Transaction Timeline",
@@ -185,12 +249,6 @@ def render(box_df=None):
 
         if dossier_sub == "Season-by-Season & Manager Breakdown":
             st.write(f"#### {sel_player} — Season-by-Season Career Log")
-            szn_set = sorted(
-                list(set(p_draft['Year'].unique().tolist() if not p_draft.empty else []) |
-                     set(p_box['Szn'].unique().tolist() if not p_box.empty else [])),
-                reverse=True
-            )
-
             szn_rows = []
             for syr in szn_set:
                 d_row = p_draft[p_draft['Year'] == syr].iloc[0] if (not p_draft.empty and syr in p_draft['Year'].values) else None
@@ -589,4 +647,4 @@ def render(box_df=None):
             columns={'Mgr': 'Manager', 'Pl': 'Player'}
         )
         render_table(disp, left_align_cols=['Player', 'Seasons'])
-      
+        
