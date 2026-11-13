@@ -204,6 +204,16 @@ def load_box_scores():
     except Exception:
         pass
 
+    try:
+     df_17 = pd.read_excel("reconstructed_2017_box_scores.xlsx", sheet_name="Box_Scores_2017", engine="openpyxl")
+     if not df_17.empty:
+         if dfs:
+             s_str = dfs[0]['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+             dfs[0] = dfs[0][s_str != '2017'].copy()
+         dfs.append(df_17)
+ except Exception:
+     pass
+
     if not dfs:
         return pd.DataFrame()
 
@@ -1050,8 +1060,7 @@ with tab1:
         szn_stats[f'Top {p}'] = szn_stats['Season'].map(top_per_szn[p]).fillna("")
         
     disp_cols = ['Season', 'W', 'L', 'Win %', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome', 'Weekly Bags', 'Expected Wins', 'Luck Factor', 'Top QB', 'Top RB', 'Top WR', 'Top TE']
-    hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if (str(row.get('Season','')).strip() in ['2017', '2018'] and c == 'Weekly Bags') or (str(row.get('Season','')).strip() == '2017' and c in ['Top QB', 'Top RB', 'Top WR', 'Top TE']) else '' for c in row.index]
-    render_html_table(szn_stats[disp_cols].sort_values('Season', ascending=False), highlight_fn=hl_cells)
+    hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if (str(row.get('Season','')).strip() in ['2017', '2018'] and c == 'Weekly Bags') 
     
     st.divider()
     st.write("### Playoff Game Log")
