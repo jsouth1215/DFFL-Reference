@@ -43,8 +43,8 @@ def render_table(df, left_align_cols=None):
     ]).to_html()
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
-@st.cache_data(ttl=600)
-def load_deadball_data():
+@st.cache_data(ttl=60)
+def load_deadball_data_v2():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -61,7 +61,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data()
+    data = load_deadball_data_v2()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
@@ -152,7 +152,6 @@ def render():
             c_bw1, c_bw2 = st.columns([1, 2])
             sel_bwk = c_bw1.selectbox("Select 2014 Week:", bwks, key="db_box14_wk")
             wk_b = b14_df[b14_df["Week"] == int(sel_bwk)].copy()
-            # Build matchup pairs in this week
             pairs_seen = []
             pair_labels = []
             pair_map = {}
@@ -193,7 +192,7 @@ def render():
                 sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
                 sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
                 if "Notes" not in sub_m.columns:
-                    sub_m["Notes"] = sub_m["Week"].apply(lambda w: "Official Scoreboard" if int(w) <= 7 else "Thu Lineup + NFL Actuals")
+                    sub_m["Notes"] = sub_m["Week"].apply(lambda w: "Official Scoreboard" if int(w) <= 7 else "Reconstructed")
                 render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Notes"]], left_align_cols=["Notes"])
         with c2:
             st.write("#### 2014 Waiver & Free Agency Log (Weeks 1-17)")
