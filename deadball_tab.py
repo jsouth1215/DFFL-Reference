@@ -146,12 +146,26 @@ def render():
     elif sub_view == "2014 Scoreboards, Box Scores & Waivers":
         b14_df = data.get("Box_Scores_2014", pd.DataFrame())
         if not b14_df.empty:
-            st.write("#### 2014 Matchup Box Score Archive (Jack's Matchups: Weeks 1-16)")
-            st.caption("Weeks 1-7 are official ESPN box scores. Weeks 8-16 are Thursday preview starting lineups scored with 2014 NFL actual stats (with original Thursday projections shown for reference).")
+            st.write("#### 2014 Matchup Box Score Archive (All League Matchups: Weeks 1-16)")
+            st.caption("Jack's Weeks 1-7 matchups are official ESPN box scores; Jack's Weeks 8-16 matchups use the Thursday preview starting lineups scored with 2014 NFL actuals. Other league matchups are reconstructed from weekly rosters (Draft + Waivers + Trades) and 2014 NFL actuals.")
             bwks = sorted(b14_df["Week"].unique().tolist())
-            sel_bwk = st.selectbox("Select 2014 Week Box Score:", bwks, key="db_box14_wk")
+            c_bw1, c_bw2 = st.columns([1, 2])
+            sel_bwk = c_bw1.selectbox("Select 2014 Week:", bwks, key="db_box14_wk")
             wk_b = b14_df[b14_df["Week"] == int(sel_bwk)].copy()
-            mgrs_in_wk = wk_b["Manager"].unique().tolist()
+            # Build matchup pairs in this week
+            pairs_seen = []
+            pair_labels = []
+            pair_map = {}
+            for _, r_b in wk_b[["Manager", "Opponent"]].drop_duplicates().iterrows():
+                m_a, m_b = str(r_b["Manager"]), str(r_b["Opponent"])
+                key_set = frozenset([m_a, m_b])
+                if key_set not in pairs_seen:
+                    pairs_seen.append(key_set)
+                    lbl = f"{m_a} vs. {m_b}"
+                    pair_labels.append(lbl)
+                    pair_map[lbl] = [m_a] if m_b == "BYE" else [m_a, m_b]
+            sel_pair = c_bw2.selectbox("Select Matchup:", pair_labels, key=f"db_box14_pair_{sel_bwk}")
+            mgrs_in_wk = pair_map.get(sel_pair, [])
             bc1, bc2 = st.columns(2)
             for idx_m, m_name in enumerate(mgrs_in_wk[:2]):
                 target_col = bc1 if idx_m == 0 else bc2
