@@ -44,7 +44,7 @@ def render_table(df, left_align_cols=None):
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
-def load_deadball_data_v3():
+def load_deadball_data_v4():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -61,7 +61,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data_v3()
+    data = load_deadball_data_v4()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
@@ -71,9 +71,9 @@ def render():
         [
             "Season Standings & Summary (2011-2014)",
             "Deadball Draft Boards (2012-2014)",
-            "2014 Team Schedules & Season Logs",
-            "2014 Weekly Scoreboards & Box Scores",
-            "2014 Waiver & Free Agency Log",
+            "Team Schedules & Season Logs (2012 & 2014)",
+            "Weekly Scoreboards & Box Scores (2012 & 2014)",
+            "Waiver, Free Agency & Activity Logs (2012 & 2014)",
             "Trade & Proposal Archive (2011-2014)"
         ],
         horizontal=True,
@@ -145,16 +145,21 @@ def render():
             unsafe_allow_html=True
         )
 
-    elif sub_view == "2014 Team Schedules & Season Logs":
-        m_df = data.get("Matchups_2014", pd.DataFrame())
-        b14_df = data.get("Box_Scores_2014", pd.DataFrame())
+    elif sub_view == "Team Schedules & Season Logs (2012 & 2014)":
+        c_yr_s, c_tm1, c_tm2 = st.columns([1.0, 1.2, 2.5])
+        sel_sched_yr = c_yr_s.selectbox("Select Season:", [2014, 2012], key="db_sched_yr_sel")
+        m_df = data.get("Matchups_2014" if int(sel_sched_yr) == 2014 else "Matchups_2012", pd.DataFrame())
+        b14_df = data.get("Box_Scores_2014", pd.DataFrame()) if int(sel_sched_yr) == 2014 else pd.DataFrame()
         if m_df.empty:
-            st.info("No 2014 matchup data found.")
+            st.info(f"No {sel_sched_yr} matchup data found.")
             return
 
-        all_mgrs = ["Jack", "David", "Keith", "Cam/Eli", "Cav", "Austin", "Sean", "CJ", "Noah", "Matt", "Lukas", "Max"]
-        c_tm1, c_tm2 = st.columns([1.2, 2.8])
-        sel_mgr = c_tm1.selectbox("Select 2014 Franchise:", all_mgrs, key="db_2014_tm_sel")
+        all_mgrs = (
+            ["Jack", "David", "Keith", "Cam/Eli", "Cav", "Austin", "Sean", "CJ", "Noah", "Matt", "Lukas", "Max"]
+            if int(sel_sched_yr) == 2014 else
+            ["Eli", "Noah", "Lukas", "Sean", "Cav", "Matt", "David", "Cam", "CJ", "Keith", "Max", "Jack/Austin"]
+        )
+        sel_mgr = c_tm1.selectbox(f"Select {sel_sched_yr} Franchise:", all_mgrs, key=f"db_{sel_sched_yr}_tm_sel")
 
         tm_games = m_df[(m_df["Manager_1"] == sel_mgr) | (m_df["Manager_2"] == sel_mgr)].sort_values("Week").copy()
         w_cnt, l_cnt = 0, 0
@@ -212,7 +217,7 @@ def render():
 
         with c_tm2:
             st.markdown(
-                f"**{sel_mgr} — 2014 Regular Season Summary:** "
+                f"**{sel_mgr} — {sel_sched_yr} Regular Season Summary:** "
                 f"Record: **`{w_cnt}-{l_cnt}-0`** | "
                 f"Points For: **`{pf_reg:.1f}`** (`{pf_reg/max(1, w_cnt+l_cnt):.1f}` PPG) | "
                 f"Points Against: **`{pa_reg:.1f}`** (`{pa_reg/max(1, w_cnt+l_cnt):.1f}` PPG)"
@@ -253,13 +258,14 @@ def render():
                             else:
                                 render_table(opp_b[["Slot", "Player", "Pts"]], left_align_cols=["Player"])
 
-    elif sub_view == "2014 Weekly Scoreboards & Box Scores":
-        m_df = data.get("Matchups_2014", pd.DataFrame())
-        b14_df = data.get("Box_Scores_2014", pd.DataFrame())
+    elif sub_view == "Weekly Scoreboards & Box Scores (2012 & 2014)":
+        c_byr, c_top1, c_top2 = st.columns([1, 1, 2])
+        sel_board_yr = c_byr.selectbox("Select Season:", [2014, 2012], key="db_board_yr_sel")
+        m_df = data.get("Matchups_2014" if int(sel_board_yr) == 2014 else "Matchups_2012", pd.DataFrame())
+        b14_df = data.get("Box_Scores_2014", pd.DataFrame()) if int(sel_board_yr) == 2014 else pd.DataFrame()
         if not m_df.empty:
             wks = sorted(m_df["Week"].unique().tolist())
-            c_top1, c_top2 = st.columns([1, 2])
-            sel_wk = c_top1.selectbox("Select 2014 Week:", wks, key="db_wk_board_sel")
+            sel_wk = c_top1.selectbox(f"Select {sel_board_yr} Week:", wks, key=f"db_wk_board_sel_{sel_board_yr}")
 
             st.write(f"#### Week {sel_wk} League Scoreboard")
             sub_m = m_df[m_df["Week"] == int(sel_wk)].copy()
@@ -299,7 +305,13 @@ def render():
                         else:
                             render_table(m_rows[["Slot", "Player", "Pts"]], left_align_cols=["Player"])
 
-    elif sub_view == "2014 Waiver & Free Agency Log":
+    elif sub_view == "Waiver, Free Agency & Activity Logs (2012 & 2014)":
+        act12_df = data.get("Activity_2012", pd.DataFrame())
+        if not act12_df.empty:
+            st.write("#### 2012 Full-Season Roster Activity Totals (Trades, Adds, Drops & Activations)")
+            st.caption("Extracted from the December 2012 league stat sheet.")
+            render_table(act12_df[["Season", "Manager", "Trades", "Acquisitions", "Drops", "Activations"]])
+            st.divider()
         st.write("#### 2014 Waiver & Free Agency Transaction Log (Weeks 1-17)")
         tx_df = data.get("Transactions_2014", pd.DataFrame())
         if not tx_df.empty:
