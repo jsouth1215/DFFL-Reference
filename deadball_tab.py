@@ -44,7 +44,7 @@ def render_table(df, left_align_cols=None):
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
-def load_deadball_data_v4():
+def load_deadball_data_v5():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -61,7 +61,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data_v4()
+    data = load_deadball_data_v5()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
@@ -149,7 +149,7 @@ def render():
         c_yr_s, c_tm1, c_tm2 = st.columns([1.0, 1.2, 2.5])
         sel_sched_yr = c_yr_s.selectbox("Select Season:", [2014, 2012], key="db_sched_yr_sel")
         m_df = data.get("Matchups_2014" if int(sel_sched_yr) == 2014 else "Matchups_2012", pd.DataFrame())
-        b14_df = data.get("Box_Scores_2014", pd.DataFrame()) if int(sel_sched_yr) == 2014 else pd.DataFrame()
+        b14_df = data.get("Box_Scores_2014" if int(sel_sched_yr) == 2014 else "Box_Scores_2012", pd.DataFrame())
         if m_df.empty:
             st.info(f"No {sel_sched_yr} matchup data found.")
             return
@@ -249,8 +249,9 @@ def render():
                 with bc1:
                     tot_a = sub_b["Points"].sum()
                     src_a = sub_b["Source"].iloc[0] if not sub_b.empty else ""
-                    st.markdown(f"**{sel_mgr}** | Total: **{tot_a:.1f} pts** *({src_a})*")
-                    sub_b["Pts"] = sub_b["Points"].apply(lambda x: f"{float(x):.1f}")
+                    fmt_a = f"{int(round(tot_a))}" if int(sel_sched_yr) == 2012 else f"{tot_a:.1f}"
+                    st.markdown(f"**{sel_mgr}** | Total: **{fmt_a} pts** *({src_a})*")
+                    sub_b["Pts"] = sub_b["Points"].apply(lambda x: f"{int(round(float(x)))}" if int(sel_sched_yr) == 2012 else f"{float(x):.1f}")
                     if "Email_Proj" in sub_b.columns and sub_b["Email_Proj"].notnull().any():
                         sub_b["Thu Proj"] = sub_b["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
                         render_table(sub_b[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
@@ -262,8 +263,9 @@ def render():
                         if not opp_b.empty:
                             tot_b = opp_b["Points"].sum()
                             src_b = opp_b["Source"].iloc[0]
-                            st.markdown(f"**{opp_name}** | Total: **{tot_b:.1f} pts** *({src_b})*")
-                            opp_b["Pts"] = opp_b["Points"].apply(lambda x: f"{float(x):.1f}")
+                            fmt_b = f"{int(round(tot_b))}" if int(sel_sched_yr) == 2012 else f"{tot_b:.1f}"
+                            st.markdown(f"**{opp_name}** | Total: **{fmt_b} pts** *({src_b})*")
+                            opp_b["Pts"] = opp_b["Points"].apply(lambda x: f"{int(round(float(x)))}" if int(sel_sched_yr) == 2012 else f"{float(x):.1f}")
                             if "Email_Proj" in opp_b.columns and opp_b["Email_Proj"].notnull().any():
                                 opp_b["Thu Proj"] = opp_b["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
                                 render_table(opp_b[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
@@ -274,7 +276,7 @@ def render():
         c_byr, c_top1, c_top2 = st.columns([1, 1, 2])
         sel_board_yr = c_byr.selectbox("Select Season:", [2014, 2012], key="db_board_yr_sel")
         m_df = data.get("Matchups_2014" if int(sel_board_yr) == 2014 else "Matchups_2012", pd.DataFrame())
-        b14_df = data.get("Box_Scores_2014", pd.DataFrame()) if int(sel_board_yr) == 2014 else pd.DataFrame()
+        b14_df = data.get("Box_Scores_2014" if int(sel_board_yr) == 2014 else "Box_Scores_2012", pd.DataFrame())
         if not m_df.empty:
             wks = sorted(m_df["Week"].unique().tolist())
             sel_wk = c_top1.selectbox(f"Select {sel_board_yr} Week:", wks, key=f"db_wk_board_sel_{sel_board_yr}")
@@ -316,8 +318,9 @@ def render():
                         m_rows = wk_b[wk_b["Manager"] == m_name].copy()
                         tot_pts = m_rows["Points"].sum()
                         src_tag = m_rows["Source"].iloc[0] if not m_rows.empty else ""
-                        st.markdown(f"**{m_name}** | Starter Total: **{tot_pts:.1f} pts** *({src_tag})*")
-                        m_rows["Pts"] = m_rows["Points"].apply(lambda x: f"{float(x):.1f}")
+                        fmt_p = f"{int(round(tot_pts))}" if int(sel_board_yr) == 2012 else f"{tot_pts:.1f}"
+                        st.markdown(f"**{m_name}** | Starter Total: **{fmt_p} pts** *({src_tag})*")
+                        m_rows["Pts"] = m_rows["Points"].apply(lambda x: f"{int(round(float(x)))}" if int(sel_board_yr) == 2012 else f"{float(x):.1f}")
                         if "Email_Proj" in m_rows.columns and m_rows["Email_Proj"].notnull().any():
                             m_rows["Thu Proj"] = m_rows["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
                             render_table(m_rows[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
