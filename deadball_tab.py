@@ -155,7 +155,7 @@ def render():
                 sub_m = m_df.copy() if sel_wk.startswith("All") else m_df[m_df["Week"] == int(sel_wk)].copy()
                 sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
                 sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
-                sub_m["Notes"] = sub_m["Team_2"].apply(lambda x: x if ("Lineup" in str(x) or "Bye" in str(x)) else "Official Scoreboard")
+                sub_m["Notes"] = sub_m["Notes"].fillna("Official Scoreboard") if "Notes" in sub_m.columns else sub_m["Week"].apply(lambda w: "Official Scoreboard" if int(w) <= 7 else "Reconstructed Lineup")
                 render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Notes"]], left_align_cols=["Notes"])
         with c2:
             st.write("#### 2014 Waiver & Free Agency Log (Weeks 1-17)")
