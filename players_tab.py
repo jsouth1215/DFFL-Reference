@@ -340,7 +340,7 @@ def render(box_df=None):
                         )
                     render_table(d_disp)
                 else:
-                    st.info("Never drafted in DFFL (2018–2026).")
+                    st.info("Never drafted in DFFL (2017–2026).")
 
             with c_right:
                 st.write(f"#### {sel_player} — Complete Transaction & Trade Log")
@@ -427,7 +427,7 @@ def render(box_df=None):
 
     # ================= VIEW 2: ALL-TIME CAREER LEADERS =================
     elif player_view == "All-Time Career Leaders":
-        st.caption("All-time career DFFL production across 2018–2026. **Value Score** sums weekly starter points above positional replacement (minus -0.5 pt/wk healthy bench clog).")
+        st.caption("All-time career DFFL production across 2017–2026. **Value Score** sums weekly starter points above positional replacement (minus -0.5 pt/wk healthy bench clog).")
         c1, c2, c3 = st.columns(3)
         pos_f = c1.selectbox("Position Filter:", ["Skill Players (QB/RB/WR/TE)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="acl_pos")
         sort_by = c2.selectbox("Rank By:", ["Total Value Score", "Total Starter Points", "Total Career Starts", "Career Pts / Start (Min. 15 Starts)"], key="acl_sort")
@@ -483,9 +483,9 @@ def render(box_df=None):
 
     # ================= VIEW 3: SINGLE-SEASON LEGENDS =================
     elif player_view == "Single-Season Legends":
-        st.caption("Greatest individual player-seasons in DFFL history (2018–2026).")
+        st.caption("Greatest individual player-seasons in DFFL history (2017–2026).")
         c1, c2, c3 = st.columns(3)
-        s_yr = c1.selectbox("Season:", ["All-Time (2018–2026)"] + [str(y) for y in sorted(b_scored['Szn'].unique(), reverse=True)], key="ssl_yr")
+        s_yr = c1.selectbox("Season:", ["All-Time (2017–2026)"] + [str(y) for y in sorted(b_scored['Szn'].unique(), reverse=True)], key="ssl_yr")
         s_pos = c2.selectbox("Position:", ["Skill Players (QB/RB/WR/TE)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="ssl_pos")
         s_sort = c3.selectbox("Rank By:", ["Season Value Score", "Season Starter Points", "Pts / Start (Min. 8 Starts)"], key="ssl_sort")
 
@@ -548,7 +548,7 @@ def render(box_df=None):
         )
 
         c1, c2 = st.columns(2)
-        b_yr = c1.selectbox("Season:", ["All-Time (2018–2026)"] + [str(y) for y in sorted(b_scored['Szn'].unique(), reverse=True)], key="wb_yr")
+        b_yr = c1.selectbox("Season:", ["All-Time (2017–2026)"] + [str(y) for y in sorted(b_scored['Szn'].unique(), reverse=True)], key="wb_yr")
         b_pos = c2.selectbox("Position:", ["Skill Players (QB/RB/WR/TE)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="wb_pos")
 
         sub = b_scored.copy()
@@ -647,4 +647,7 @@ def render(box_df=None):
             columns={'Mgr': 'Manager', 'Pl': 'Player'}
         )
         render_table(disp, left_align_cols=['Player', 'Seasons'])
-        
+
+    elif player_view == "Player Records":
+        import app as _app_mod
+        _app_mod.render_player_records_section(box_df)

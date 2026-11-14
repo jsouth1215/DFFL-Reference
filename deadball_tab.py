@@ -83,7 +83,7 @@ def render():
             "#### 🏆 Deadball Era Champions & Shared Franchises\n"
             "* **2011 Season:** **Matt** won the inaugural championship (12 solo managers; **Max** joined in 2012 as the 13th member, launching the co-ownership era).\n"
             "* **2012 Season:** **Jack & Austin** shared a franchise. **Matt** won back-to-back titles as the #6 seed (`6-7`), defeating **Lukas**, **Noah**, and **Sean**. **Eli** won the regular-season scoring title. **Max & Keith** lost the consolation bracket and shared a franchise in 2013.\n"
-            "* **2013 Season:** **Jack**, **Cav**, **Austin**, and **Max/Keith** reached the Championship Semifinals. **Cam & Eli** lost the consolation bracket to **Sean** and **Lukas** and shared a franchise in 2014.\n"
+            "* **2013 Season:** **Max & Keith** won the league championship, advancing out of a Semifinal field with **Jack**, **Cav**, and **Austin**. *(Shared Franchise: **Max & Keith**)*
             "* **2014 Season:** **David** (`10-3-0`) won the championship, defeating **Jack** (`9-4-0`) in the Week 16 Final."
         )
         st_df = data.get("Standings_2012_2014", pd.DataFrame())
