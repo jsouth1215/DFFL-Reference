@@ -2781,5 +2781,7 @@ elif active_tab == "Players":
 
 # ================= TAB 11: DEADBALL ERA =================
 elif active_tab == "Deadball Era":
+    import importlib
+    importlib.reload(deadball_tab)
     deadball_tab.render()
 
