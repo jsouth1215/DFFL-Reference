@@ -146,21 +146,49 @@ def render():
     elif sub_view == "2014 Scoreboards & Waiver Wire":
         c1, c2 = st.columns(2)
         with c1:
-            st.write("#### 2014 Weekly Matchup Results (Weeks 1-7)")
+            st.write("#### 2014 Weekly Matchup Results (Weeks 1-16)")
+            st.caption("Weeks 1-7 include all league-wide official scoreboards. Weeks 8-16 feature Jack's weekly matchups reconstructed from Thursday starter lineups and 2014 NFL actual stats.")
             m_df = data.get("Matchups_2014", pd.DataFrame())
             if not m_df.empty:
                 wks = sorted(m_df["Week"].unique().tolist())
-                sel_wk = st.selectbox("Select Week:", ["All Weeks (1-7)"] + [str(w) for w in wks], key="db_wk_sel")
-                sub_m = m_df if sel_wk.startswith("All") else m_df[m_df["Week"] == int(sel_wk)]
-                render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2"]])
+                sel_wk = st.selectbox("Select Week:", ["All Weeks (1-16)"] + [str(w) for w in wks], key="db_wk_sel")
+                sub_m = m_df.copy() if sel_wk.startswith("All") else m_df[m_df["Week"] == int(sel_wk)].copy()
+                sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+                sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+                sub_m["Notes"] = sub_m["Team_2"].apply(lambda x: x if ("Lineup" in str(x) or "Bye" in str(x)) else "Official Scoreboard")
+                render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Notes"]], left_align_cols=["Notes"])
         with c2:
-            st.write("#### 2014 Waiver & Free Agency Log")
+            st.write("#### 2014 Waiver & Free Agency Log (Weeks 1-17)")
             tx_df = data.get("Transactions_2014", pd.DataFrame())
             if not tx_df.empty:
                 mgrs = ["All Managers"] + sorted(tx_df["Manager"].astype(str).unique().tolist())
                 sel_m = st.selectbox("Filter Manager:", mgrs, key="db_tx_mgr")
                 sub_tx = tx_df if sel_m == "All Managers" else tx_df[tx_df["Manager"] == sel_m]
                 render_table(sub_tx[["Report_Date", "Manager", "Action", "Player", "Position", "NFL_Team", "Method"]], left_align_cols=["Player"])
+
+        b14_df = data.get("Box_Scores_2014", pd.DataFrame())
+        if not b14_df.empty:
+            st.divider()
+            st.write("#### 2014 Matchup Box Score Archive (Jack's Matchups: Weeks 1-16)")
+            st.caption("Weeks 1-7 are official ESPN box scores. Weeks 8-16 are the Thursday preview starting lineups scored with 2014 NFL actual stats (with original Thursday projections shown for reference).")
+            bwks = sorted(b14_df["Week"].unique().tolist())
+            sel_bwk = st.selectbox("Select 2014 Week Box Score:", bwks, key="db_box14_wk")
+            wk_b = b14_df[b14_df["Week"] == int(sel_bwk)].copy()
+            mgrs_in_wk = wk_b["Manager"].unique().tolist()
+            bc1, bc2 = st.columns(2)
+            for idx_m, m_name in enumerate(mgrs_in_wk[:2]):
+                target_col = bc1 if idx_m == 0 else bc2
+                with target_col:
+                    m_rows = wk_b[wk_b["Manager"] == m_name].copy()
+                    tot_pts = m_rows["Points"].sum()
+                    src_tag = m_rows["Source"].iloc[0] if not m_rows.empty else ""
+                    st.markdown(f"**{m_name}** — Total: **{tot_pts:.1f} pts** *({src_tag})*")
+                    m_rows["Pts"] = m_rows["Points"].apply(lambda x: f"{float(x):.1f}")
+                    if m_rows["Email_Proj"].notnull().any():
+                        m_rows["Thu Proj"] = m_rows["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+                        render_table(m_rows[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
+                    else:
+                        render_table(m_rows[["Slot", "Player", "Pts"]], left_align_cols=["Player"])
 
     elif sub_view == "Trade & Proposal Archive (2011-2014)":
         tr_df = data.get("Trades_2011_2014", pd.DataFrame())
