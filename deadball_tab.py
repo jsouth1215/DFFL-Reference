@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 
 POS_COLORS = {
@@ -13,6 +13,7 @@ POS_COLORS = {
 def render_table(df, left_align_cols=None):
     if df is None or df.empty:
         return
+    df = df.loc[:, ~df.columns.duplicated()].reset_index(drop=True).copy()
     styler = df.style.hide(axis='index')
     styler = styler.set_properties(**{
         'text-align': 'center',
@@ -54,10 +55,10 @@ def load_deadball_data():
     return out
 
 def render():
-    st.markdown("### 🕰️ The Deadball Era Archive (2011–2014)")
+    st.markdown("### The Deadball Era Archive (2011-2014)")
     st.caption(
-        "Historical archive from the league's early 12-team seasons (2011–2014). "
-        "From 2012 to 2014, 13 managers competed for 12 franchise spots—with the two bottom consolation finishers co-managing a shared franchise the following season."
+        "Historical archive from the league's early 12-team seasons (2011-2014). "
+        "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
     data = load_deadball_data()
@@ -68,23 +69,23 @@ def render():
     sub_view = st.radio(
         "Deadball Era View:",
         [
-            "Season Standings & Summary (2011–2014)",
-            "Deadball Draft Boards (2012–2014)",
+            "Season Standings & Summary (2011-2014)",
+            "Deadball Draft Boards (2012-2014)",
             "2014 Scoreboards & Waiver Wire",
-            "Trade & Proposal Archive (2011–2014)"
+            "Trade & Proposal Archive (2011-2014)"
         ],
         horizontal=True,
         key="deadball_sub_view"
     )
     st.write("---")
 
-    if sub_view == "Season Standings & Summary (2011–2014)":
+    if sub_view == "Season Standings & Summary (2011-2014)":
         st.markdown(
-            "#### 🏆 Deadball Era Champions & Shared Franchises\n"
-            "* **2011 Season:** **Matt** won the inaugural championship (12 solo managers; **Max** joined in 2012 as the 13th member, launching the co-ownership era).\n"
-            "* **2012 Season:** **Jack & Austin** shared a franchise. **Matt** won back-to-back titles as the #6 seed (`6-7`), defeating **Lukas**, **Noah**, and **Sean**. **Eli** won the regular-season scoring title. **Max & Keith** lost the consolation bracket and shared a franchise in 2013.\n"
-            "* **2013 Season:** **Max & Keith** won the league championship, advancing out of a Semifinal field with **Jack**, **Cav**, and **Austin**. *(Shared Franchise: **Max & Keith**)*
-            "* **2014 Season:** **David** (`10-3-0`) won the championship, defeating **Jack** (`9-4-0`) in the Week 16 Final."
+            "#### Deadball Era Champions & Shared Franchises\n"
+            "* **2011 Season:** **Matt** won the inaugural championship. *(12 solo managers; no shared franchises)*\n"
+            "* **2012 Season:** **Matt** won back-to-back titles as the #6 seed (`6-7`), defeating **Lukas**, **Noah**, and **Sean**. **Eli** won the regular-season scoring title. *(Shared Franchise: **Jack & Austin**)*\n"
+            "* **2013 Season:** **Max & Keith** won the league championship, advancing out of a Semifinal field with **Jack**, **Cav**, and **Austin**. *(Shared Franchise: **Max & Keith**)*\n"
+            "* **2014 Season:** **David** (`10-3-0`) won the championship, defeating **Jack** (`9-4-0`) in the Week 16 Final. *(Shared Franchise: **Cam & Eli**)*"
         )
         st_df = data.get("Standings_2012_2014", pd.DataFrame())
         if not st_df.empty:
@@ -92,14 +93,14 @@ def render():
             sub_st = st_df[st_df["Season"] == int(yr_sel)][["Season", "Finish", "Seed", "Manager", "Record", "Notes"]]
             render_table(sub_st, left_align_cols=["Notes"])
 
-    elif sub_view == "Deadball Draft Boards (2012–2014)":
+    elif sub_view == "Deadball Draft Boards (2012-2014)":
         d_df = data.get("Drafts_2012_2014", pd.DataFrame())
         if d_df.empty:
             st.info("No draft data found.")
             return
         sel_yr = st.selectbox("Select Draft Year:", [2014, 2013, 2012], key="db_draft_yr")
         if int(sel_yr) == 2013:
-            st.caption("ℹ️ **2013 Offline Draft:** Ordered by the official 2013 draft order (`1. CJ` through `12. Max/Keith`) and post-draft roster entry.")
+            st.caption("2013 Offline Draft: Ordered by the official 2013 draft order (1. CJ through 12. Max/Keith) and post-draft roster entry.")
 
         yr_df = d_df[d_df["Year"] == int(sel_yr)].copy()
         r1 = yr_df[yr_df["Round"] == 1].sort_values("Draft Slot")
@@ -123,7 +124,7 @@ def render():
                     p_name = str(pick_row["Player"])
                     ov = int(pick_row["Overall Pick"])
                     rp = int(pick_row["Round Pick"])
-                    arrow = "→" if r_num % 2 == 1 else "←"
+                    arrow = "->" if r_num % 2 == 1 else "<-"
                     cells += (
                         f'<td style="border: 1px solid #ccc; background-color: {bg}; color: {fg}; padding: 5px 6px; text-align: left; vertical-align: top; min-width: 115px;">'
                         f'<div style="font-size: 10px; opacity: 0.75; display: flex; justify-content: space-between;">'
@@ -145,11 +146,11 @@ def render():
     elif sub_view == "2014 Scoreboards & Waiver Wire":
         c1, c2 = st.columns(2)
         with c1:
-            st.write("#### 2014 Weekly Matchup Results (Weeks 1–7)")
+            st.write("#### 2014 Weekly Matchup Results (Weeks 1-7)")
             m_df = data.get("Matchups_2014", pd.DataFrame())
             if not m_df.empty:
                 wks = sorted(m_df["Week"].unique().tolist())
-                sel_wk = st.selectbox("Select Week:", ["All Weeks (1–7)"] + [str(w) for w in wks], key="db_wk_sel")
+                sel_wk = st.selectbox("Select Week:", ["All Weeks (1-7)"] + [str(w) for w in wks], key="db_wk_sel")
                 sub_m = m_df if sel_wk.startswith("All") else m_df[m_df["Week"] == int(sel_wk)]
                 render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2"]])
         with c2:
@@ -161,11 +162,11 @@ def render():
                 sub_tx = tx_df if sel_m == "All Managers" else tx_df[tx_df["Manager"] == sel_m]
                 render_table(sub_tx[["Report_Date", "Manager", "Action", "Player", "Position", "NFL_Team", "Method"]], left_align_cols=["Player"])
 
-    elif sub_view == "Trade & Proposal Archive (2011–2014)":
+    elif sub_view == "Trade & Proposal Archive (2011-2014)":
         tr_df = data.get("Trades_2011_2014", pd.DataFrame())
         if not tr_df.empty:
             c1, c2 = st.columns(2)
-            yr_f = c1.selectbox("Filter Season:", ["All Years (2011–2014)", "2014", "2013", "2012", "2011"], key="db_tr_yr")
+            yr_f = c1.selectbox("Filter Season:", ["All Years (2011-2014)", "2014", "2013", "2012", "2011"], key="db_tr_yr")
             st_f = c2.selectbox("Filter Status:", ["All Emails", "Accepted / Upheld", "Proposal", "Declined"], key="db_tr_st")
             sub_tr = tr_df.copy()
             if not yr_f.startswith("All"):
