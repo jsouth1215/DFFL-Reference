@@ -44,7 +44,7 @@ def render_table(df, left_align_cols=None):
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
-def load_deadball_data_v2():
+def load_deadball_data_v3():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -61,7 +61,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data_v2()
+    data = load_deadball_data_v3()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
@@ -71,7 +71,9 @@ def render():
         [
             "Season Standings & Summary (2011-2014)",
             "Deadball Draft Boards (2012-2014)",
-            "2014 Scoreboards, Box Scores & Waivers",
+            "2014 Team Schedules & Season Logs",
+            "2014 Weekly Scoreboards & Box Scores",
+            "2014 Waiver & Free Agency Log",
             "Trade & Proposal Archive (2011-2014)"
         ],
         horizontal=True,
@@ -143,65 +145,174 @@ def render():
             unsafe_allow_html=True
         )
 
-    elif sub_view == "2014 Scoreboards, Box Scores & Waivers":
+    elif sub_view == "2014 Team Schedules & Season Logs":
+        m_df = data.get("Matchups_2014", pd.DataFrame())
         b14_df = data.get("Box_Scores_2014", pd.DataFrame())
-        if not b14_df.empty:
-            st.write("#### 2014 Matchup Box Score Archive (All League Matchups: Weeks 1-16)")
-            st.caption("Jack's Weeks 1-7 matchups are official ESPN box scores; Jack's Weeks 8-16 matchups use the Thursday preview starting lineups scored with 2014 NFL actuals. Other league matchups are reconstructed from weekly rosters (Draft + Waivers + Trades) and 2014 NFL actuals.")
-            bwks = sorted(b14_df["Week"].unique().tolist())
-            c_bw1, c_bw2 = st.columns([1, 2])
-            sel_bwk = c_bw1.selectbox("Select 2014 Week:", bwks, key="db_box14_wk")
-            wk_b = b14_df[b14_df["Week"] == int(sel_bwk)].copy()
-            pairs_seen = []
-            pair_labels = []
-            pair_map = {}
-            for _, r_b in wk_b[["Manager", "Opponent"]].drop_duplicates().iterrows():
-                m_a, m_b = str(r_b["Manager"]), str(r_b["Opponent"])
-                key_set = frozenset([m_a, m_b])
-                if key_set not in pairs_seen:
-                    pairs_seen.append(key_set)
-                    lbl = f"{m_a} vs. {m_b}"
-                    pair_labels.append(lbl)
-                    pair_map[lbl] = [m_a] if m_b == "BYE" else [m_a, m_b]
-            sel_pair = c_bw2.selectbox("Select Matchup:", pair_labels, key=f"db_box14_pair_{sel_bwk}")
-            mgrs_in_wk = pair_map.get(sel_pair, [])
-            bc1, bc2 = st.columns(2)
-            for idx_m, m_name in enumerate(mgrs_in_wk[:2]):
-                target_col = bc1 if idx_m == 0 else bc2
-                with target_col:
-                    m_rows = wk_b[wk_b["Manager"] == m_name].copy()
-                    tot_pts = m_rows["Points"].sum()
-                    src_tag = m_rows["Source"].iloc[0] if not m_rows.empty else ""
-                    st.markdown(f"**{m_name}** | Starter Total: **{tot_pts:.1f} pts** *({src_tag})*")
-                    m_rows["Pts"] = m_rows["Points"].apply(lambda x: f"{float(x):.1f}")
-                    if "Email_Proj" in m_rows.columns and m_rows["Email_Proj"].notnull().any():
-                        m_rows["Thu Proj"] = m_rows["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
-                        render_table(m_rows[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
-                    else:
-                        render_table(m_rows[["Slot", "Player", "Pts"]], left_align_cols=["Player"])
-            st.divider()
+        if m_df.empty:
+            st.info("No 2014 matchup data found.")
+            return
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.write("#### 2014 Weekly Matchup Results (Weeks 1-16)")
-            m_df = data.get("Matchups_2014", pd.DataFrame())
-            if not m_df.empty:
-                wks = sorted(m_df["Week"].unique().tolist())
-                sel_wk = st.selectbox("Select Week:", ["All Weeks (1-16)"] + [str(w) for w in wks], key="db_wk_sel")
-                sub_m = m_df.copy() if sel_wk.startswith("All") else m_df[m_df["Week"] == int(sel_wk)].copy()
-                sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
-                sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
-                if "Notes" not in sub_m.columns:
-                    sub_m["Notes"] = sub_m["Week"].apply(lambda w: "Official Scoreboard" if int(w) <= 7 else "Reconstructed")
-                render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Notes"]], left_align_cols=["Notes"])
-        with c2:
-            st.write("#### 2014 Waiver & Free Agency Log (Weeks 1-17)")
-            tx_df = data.get("Transactions_2014", pd.DataFrame())
-            if not tx_df.empty:
-                mgrs = ["All Managers"] + sorted(tx_df["Manager"].astype(str).unique().tolist())
-                sel_m = st.selectbox("Filter Manager:", mgrs, key="db_tx_mgr")
-                sub_tx = tx_df if sel_m == "All Managers" else tx_df[tx_df["Manager"] == sel_m]
-                render_table(sub_tx[["Report_Date", "Manager", "Action", "Player", "Position", "NFL_Team", "Method"]], left_align_cols=["Player"])
+        all_mgrs = ["Jack", "David", "Keith", "Cam/Eli", "Cav", "Austin", "Sean", "CJ", "Noah", "Matt", "Lukas", "Max"]
+        c_tm1, c_tm2 = st.columns([1.2, 2.8])
+        sel_mgr = c_tm1.selectbox("Select 2014 Franchise:", all_mgrs, key="db_2014_tm_sel")
+
+        tm_games = m_df[(m_df["Manager_1"] == sel_mgr) | (m_df["Manager_2"] == sel_mgr)].sort_values("Week").copy()
+        w_cnt, l_cnt = 0, 0
+        pf_reg, pa_reg = 0.0, 0.0
+        sched_rows = []
+
+        for _, r in tm_games.iterrows():
+            wk = int(r["Week"])
+            is_m1 = (str(r["Manager_1"]) == sel_mgr)
+            opp = str(r["Manager_2"]) if is_m1 else str(r["Manager_1"])
+            tm_sc = float(r["Score_1"]) if is_m1 else float(r["Score_2"])
+            op_sc = float(r["Score_2"]) if is_m1 else float(r["Score_1"])
+            raw_note = str(r.get("Notes", ""))
+
+            if opp == "BYE":
+                res_str = "BYE"
+                rec_str = f"{w_cnt}-{l_cnt}"
+                score_str = f"{tm_sc:.1f}"
+                opp_str = "-"
+            else:
+                won = tm_sc > op_sc
+                if wk <= 13:
+                    if won:
+                        w_cnt += 1
+                    else:
+                        l_cnt += 1
+                    pf_reg += tm_sc
+                    pa_reg += op_sc
+                    rec_str = f"{w_cnt}-{l_cnt}"
+                else:
+                    rec_str = "Playoffs"
+                res_str = "W" if won else "L"
+                score_str = f"{tm_sc:.1f}"
+                opp_str = f"{op_sc:.1f}"
+
+            if wk <= 7:
+                conf = "Official Scoreboard"
+            elif sel_mgr == "Jack" or opp == "Jack":
+                conf = "Email Preview Lineup + NFL Actuals"
+            else:
+                conf = "Reconstructed (Mirrored Schedule + Roster)"
+
+            phase = f"Week {wk}" if wk <= 13 else (
+                "Wk 14 (QF)" if wk == 14 else ("Wk 15 (Semis)" if wk == 15 else "Wk 16 (Final)")
+            )
+            sched_rows.append({
+                "Week": phase,
+                "Opponent": opp,
+                "Result": res_str,
+                "Team Score": score_str,
+                "Opp Score": opp_str,
+                "Reg. Record": rec_str,
+                "Data Source / Notes": raw_note if ("Playoff" in raw_note or "Championship" in raw_note or "Proj" in raw_note) else conf
+            })
+
+        with c_tm2:
+            st.markdown(
+                f"**{sel_mgr} — 2014 Regular Season Summary:** "
+                f"Record: **`{w_cnt}-{l_cnt}-0`** | "
+                f"Points For: **`{pf_reg:.1f}`** (`{pf_reg/max(1, w_cnt+l_cnt):.1f}` PPG) | "
+                f"Points Against: **`{pa_reg:.1f}`** (`{pa_reg/max(1, w_cnt+l_cnt):.1f}` PPG)"
+            )
+            st.caption("Weeks 1-7 are 100% official scoreboard totals. Weeks 8-13 follow the 11-team round-robin + Weeks 12-13 rematch template and match official end-of-season standings.")
+
+        render_table(pd.DataFrame(sched_rows), left_align_cols=["Data Source / Notes"])
+
+        if not b14_df.empty:
+            st.write(f"#### Inspect {sel_mgr}'s Weekly Starting Lineup (Weeks 1-16)")
+            tm_wks = sorted(b14_df[b14_df["Manager"] == sel_mgr]["Week"].unique().tolist())
+            if tm_wks:
+                sel_twk = st.selectbox(f"Select Week for {sel_mgr}'s Box Score:", tm_wks, key="db_tm_wk_box")
+                sub_b = b14_df[(b14_df["Week"] == int(sel_twk)) & (b14_df["Manager"] == sel_mgr)].copy()
+                opp_name = str(sub_b["Opponent"].iloc[0]) if not sub_b.empty else "BYE"
+                bc1, bc2 = st.columns(2)
+                with bc1:
+                    tot_a = sub_b["Points"].sum()
+                    src_a = sub_b["Source"].iloc[0] if not sub_b.empty else ""
+                    st.markdown(f"**{sel_mgr}** | Total: **{tot_a:.1f} pts** *({src_a})*")
+                    sub_b["Pts"] = sub_b["Points"].apply(lambda x: f"{float(x):.1f}")
+                    if "Email_Proj" in sub_b.columns and sub_b["Email_Proj"].notnull().any():
+                        sub_b["Thu Proj"] = sub_b["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+                        render_table(sub_b[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
+                    else:
+                        render_table(sub_b[["Slot", "Player", "Pts"]], left_align_cols=["Player"])
+                with bc2:
+                    if opp_name != "BYE":
+                        opp_b = b14_df[(b14_df["Week"] == int(sel_twk)) & (b14_df["Manager"] == opp_name)].copy()
+                        if not opp_b.empty:
+                            tot_b = opp_b["Points"].sum()
+                            src_b = opp_b["Source"].iloc[0]
+                            st.markdown(f"**{opp_name}** | Total: **{tot_b:.1f} pts** *({src_b})*")
+                            opp_b["Pts"] = opp_b["Points"].apply(lambda x: f"{float(x):.1f}")
+                            if "Email_Proj" in opp_b.columns and opp_b["Email_Proj"].notnull().any():
+                                opp_b["Thu Proj"] = opp_b["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+                                render_table(opp_b[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
+                            else:
+                                render_table(opp_b[["Slot", "Player", "Pts"]], left_align_cols=["Player"])
+
+    elif sub_view == "2014 Weekly Scoreboards & Box Scores":
+        m_df = data.get("Matchups_2014", pd.DataFrame())
+        b14_df = data.get("Box_Scores_2014", pd.DataFrame())
+        if not m_df.empty:
+            wks = sorted(m_df["Week"].unique().tolist())
+            c_top1, c_top2 = st.columns([1, 2])
+            sel_wk = c_top1.selectbox("Select 2014 Week:", wks, key="db_wk_board_sel")
+
+            st.write(f"#### Week {sel_wk} League Scoreboard")
+            sub_m = m_df[m_df["Week"] == int(sel_wk)].copy()
+            sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+            sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+            render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Notes"]], left_align_cols=["Notes"])
+
+            if not b14_df.empty:
+                wk_b = b14_df[b14_df["Week"] == int(sel_wk)].copy()
+                pairs_seen = []
+                pair_labels = []
+                pair_map = {}
+                for _, r_b in wk_b[["Manager", "Opponent"]].drop_duplicates().iterrows():
+                    m_a, m_b = str(r_b["Manager"]), str(r_b["Opponent"])
+                    key_set = frozenset([m_a, m_b])
+                    if key_set not in pairs_seen:
+                        pairs_seen.append(key_set)
+                        lbl = f"{m_a} vs. {m_b}"
+                        pair_labels.append(lbl)
+                        pair_map[lbl] = [m_a] if m_b == "BYE" else [m_a, m_b]
+
+                sel_pair = c_top2.selectbox("Select Week Matchup Box Score:", pair_labels, key=f"db_box14_pair_{sel_wk}")
+                st.write(f"#### Week {sel_wk} Box Score: {sel_pair}")
+                mgrs_in_wk = pair_map.get(sel_pair, [])
+                bc1, bc2 = st.columns(2)
+                for idx_m, m_name in enumerate(mgrs_in_wk[:2]):
+                    target_col = bc1 if idx_m == 0 else bc2
+                    with target_col:
+                        m_rows = wk_b[wk_b["Manager"] == m_name].copy()
+                        tot_pts = m_rows["Points"].sum()
+                        src_tag = m_rows["Source"].iloc[0] if not m_rows.empty else ""
+                        st.markdown(f"**{m_name}** | Starter Total: **{tot_pts:.1f} pts** *({src_tag})*")
+                        m_rows["Pts"] = m_rows["Points"].apply(lambda x: f"{float(x):.1f}")
+                        if "Email_Proj" in m_rows.columns and m_rows["Email_Proj"].notnull().any():
+                            m_rows["Thu Proj"] = m_rows["Email_Proj"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+                            render_table(m_rows[["Slot", "Player", "Pts", "Thu Proj"]], left_align_cols=["Player"])
+                        else:
+                            render_table(m_rows[["Slot", "Player", "Pts"]], left_align_cols=["Player"])
+
+    elif sub_view == "2014 Waiver & Free Agency Log":
+        st.write("#### 2014 Waiver & Free Agency Transaction Log (Weeks 1-17)")
+        tx_df = data.get("Transactions_2014", pd.DataFrame())
+        if not tx_df.empty:
+            c_tx1, c_tx2 = st.columns(2)
+            mgrs = ["All Managers"] + sorted(tx_df["Manager"].astype(str).unique().tolist())
+            sel_m = c_tx1.selectbox("Filter by Manager:", mgrs, key="db_tx_mgr")
+            q_pl = c_tx2.text_input("Search Player Name:", "", key="db_tx_search")
+            sub_tx = tx_df.copy()
+            if sel_m != "All Managers":
+                sub_tx = sub_tx[sub_tx["Manager"] == sel_m]
+            if q_pl.strip():
+                sub_tx = sub_tx[sub_tx["Player"].astype(str).str.contains(q_pl.strip(), case=False, na=False)]
+            render_table(sub_tx[["Report_Date", "Manager", "Action", "Player", "Position", "NFL_Team", "Method"]], left_align_cols=["Player"])
 
     elif sub_view == "Trade & Proposal Archive (2011-2014)":
         tr_df = data.get("Trades_2011_2014", pd.DataFrame())
