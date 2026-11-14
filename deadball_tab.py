@@ -85,7 +85,7 @@ def render():
         st.markdown(
             "#### Deadball Era Champions & Shared Franchises\n"
             "* **2011 Season:** **Matt** won the inaugural championship. *(12 solo managers; no shared franchises)*\n"
-            "* **2012 Season:** **Matt** won back-to-back titles as the #6 seed (`6-7`), defeating **Lukas**, **Noah**, and **Sean**. **Eli** won the regular-season scoring title. *(Shared Franchise: **Jack & Austin**)*\n"
+            "* **2012 Season:** **Matt** won back-to-back titles as the #6 seed (`6-7-0`, `1,190 PF`), defeating **Lukas**, **Noah**, and **Sean**. **Eli** (`10-3-0`, `1,429 PF`) won the regular-season scoring title. *(Shared Franchise: **Jack & Austin**)*\n"
             "* **2013 Season:** **Max & Keith** won the league championship, advancing out of a Semifinal field with **Jack**, **Cav**, and **Austin**. *(Shared Franchise: **Max & Keith**)*\n"
             "* **2014 Season:** **David** (`10-3-0`) won the championship, defeating **Jack** (`9-4-0`) in the Week 16 Final. *(Shared Franchise: **Cam & Eli**)*"
         )
@@ -192,10 +192,19 @@ def render():
                 else:
                     rec_str = "Playoffs"
                 res_str = "W" if won else "L"
-                score_str = f"{tm_sc:.1f}"
-                opp_str = f"{op_sc:.1f}"
+                if int(sel_sched_yr) == 2012 and wk >= 14:
+                    score_str = "-"
+                    opp_str = "-"
+                elif int(sel_sched_yr) == 2012:
+                    score_str = f"{int(tm_sc)}"
+                    opp_str = f"{int(op_sc)}"
+                else:
+                    score_str = f"{tm_sc:.1f}"
+                    opp_str = f"{op_sc:.1f}"
 
-            if wk <= 7:
+            if int(sel_sched_yr) == 2012:
+                conf = raw_note
+            elif wk <= 7:
                 conf = "Official Scoreboard"
             elif sel_mgr == "Jack" or opp == "Jack":
                 conf = "Email Preview Lineup + NFL Actuals"
@@ -222,7 +231,10 @@ def render():
                 f"Points For: **`{pf_reg:.1f}`** (`{pf_reg/max(1, w_cnt+l_cnt):.1f}` PPG) | "
                 f"Points Against: **`{pa_reg:.1f}`** (`{pa_reg/max(1, w_cnt+l_cnt):.1f}` PPG)"
             )
-            st.caption("Weeks 1-7 are 100% official scoreboard totals. Weeks 8-13 follow the 11-team round-robin + Weeks 12-13 rematch template and match official end-of-season standings.")
+            if int(sel_sched_yr) == 2012:
+                st.caption("2012 schedule & scores reconstructed via 2-way PF/PA matrix matching from the official December 2012 league stat sheet.")
+            else:
+                st.caption("Weeks 1-7 are 100% official scoreboard totals. Weeks 8-13 follow the 11-team round-robin + Weeks 12-13 rematch template and match official end-of-season standings.")
 
         render_table(pd.DataFrame(sched_rows), left_align_cols=["Data Source / Notes"])
 
@@ -267,10 +279,17 @@ def render():
             wks = sorted(m_df["Week"].unique().tolist())
             sel_wk = c_top1.selectbox(f"Select {sel_board_yr} Week:", wks, key=f"db_wk_board_sel_{sel_board_yr}")
 
-            st.write(f"#### Week {sel_wk} League Scoreboard")
+            st.write(f"#### {sel_board_yr} Week {sel_wk} League Scoreboard")
             sub_m = m_df[m_df["Week"] == int(sel_wk)].copy()
-            sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
-            sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+            if int(sel_board_yr) == 2012 and int(sel_wk) >= 14:
+                sub_m["Score_1"] = "WIN"
+                sub_m["Score_2"] = "LOSS"
+            elif int(sel_board_yr) == 2012:
+                sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{int(float(x))}" if pd.notnull(x) else "-")
+                sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{int(float(x))}" if pd.notnull(x) else "-")
+            else:
+                sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
+                sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
             render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Notes"]], left_align_cols=["Notes"])
 
             if not b14_df.empty:
