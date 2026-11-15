@@ -44,7 +44,7 @@ def render_table(df, left_align_cols=None):
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
-def load_deadball_data_v5():
+def load_deadball_data_v6():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -54,6 +54,18 @@ def load_deadball_data_v5():
         pass
     return out
 
+def get_confidence_badge(yr, wk, m1, m2):
+    yr_i, wk_i = int(yr), int(wk)
+    if yr_i == 2012:
+        if wk_i <= 13:
+            return "[Official] Dec 2012 Stat Sheet"
+        return "[Official] 2012 Playoff Bracket"
+    if wk_i <= 7:
+        return "[Official] ESPN Tuesday Recap"
+    if m1 == "Jack" or m2 == "Jack":
+        return "[High-Confidence] Thu Email Lineup + NFL Actuals"
+    return "[Estimated] Mirrored Schedule + Roster Solver"
+
 def render():
     st.markdown("### The Deadball Era Archive (2011-2014)")
     st.caption(
@@ -61,7 +73,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data_v5()
+    data = load_deadball_data_v6()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
@@ -202,14 +214,9 @@ def render():
                     score_str = f"{tm_sc:.1f}"
                     opp_str = f"{op_sc:.1f}"
 
-            if int(sel_sched_yr) == 2012:
-                conf = raw_note
-            elif wk <= 7:
-                conf = "Official Scoreboard"
-            elif sel_mgr == "Jack" or opp == "Jack":
-                conf = "Email Preview Lineup + NFL Actuals"
-            else:
-                conf = "Reconstructed (Mirrored Schedule + Roster)"
+            conf = get_confidence_badge(sel_sched_yr, wk, sel_mgr, opp)
+            if raw_note and any(k in raw_note for k in ["Playoff", "Championship", "Upset", "Thu Proj"]):
+                conf = f"{conf} | {raw_note}"
 
             phase = f"Week {wk}" if wk <= 13 else (
                 "Wk 14 (QF)" if wk == 14 else ("Wk 15 (Semis)" if wk == 15 else "Wk 16 (Final)")
@@ -221,7 +228,7 @@ def render():
                 "Team Score": score_str,
                 "Opp Score": opp_str,
                 "Reg. Record": rec_str,
-                "Data Source / Notes": raw_note if ("Playoff" in raw_note or "Championship" in raw_note or "Proj" in raw_note) else conf
+                "Confidence & Source": conf
             })
 
         with c_tm2:
@@ -292,7 +299,11 @@ def render():
             else:
                 sub_m["Score_1"] = sub_m["Score_1"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
                 sub_m["Score_2"] = sub_m["Score_2"].apply(lambda x: f"{float(x):.1f}" if pd.notnull(x) else "-")
-            render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Notes"]], left_align_cols=["Notes"])
+            sub_m["Confidence & Source"] = sub_m.apply(
+                lambda r: f"{get_confidence_badge(sel_board_yr, r['Week'], r['Manager_1'], r['Manager_2'])}" + (f" | {r['Notes']}" if "Playoff" in str(r.get("Notes", "")) or "Championship" in str(r.get("Notes", "")) else ""),
+                axis=1
+            )
+            render_table(sub_m[["Week", "Manager_1", "Score_1", "Manager_2", "Score_2", "Confidence & Source"]], left_align_cols=["Confidence & Source"])
 
             if not b14_df.empty:
                 wk_b = b14_df[b14_df["Week"] == int(sel_wk)].copy()
