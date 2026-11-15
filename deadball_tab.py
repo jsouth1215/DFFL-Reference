@@ -44,7 +44,7 @@ def render_table(df, left_align_cols=None):
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
-def load_deadball_data_v6():
+def load_deadball_data_v7():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -73,7 +73,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data_v6()
+    data = load_deadball_data_v7()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
