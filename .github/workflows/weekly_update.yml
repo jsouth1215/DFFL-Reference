@@ -1,0 +1,49 @@
+name: Automated Weekly ESPN Data Sync
+
+on:
+  schedule:
+    # Tuesday 09:30 UTC (4:30 AM EST) - Post-MNF Rollover
+    - cron: '30 9 * * 2'
+    # Thursday 11:00 UTC (6:00 AM EST) - Post-Waivers & Stat Corrections
+    - cron: '0 11 * * 4'
+  workflow_dispatch:
+    inputs:
+      force_week:
+        description: 'Optional: Specific week number to sync (leave blank for auto-detect)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  sync-espn-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas openpyxl requests espn-api pyxlsb
+
+      - name: Run Weekly ESPN Sync
+        env:
+          DFFL_SWID: ${{ secrets.DFFL_SWID }}
+          DFFL_ESPN_S2: ${{ secrets.DFFL_ESPN_S2 }}
+        run: |
+          git config user.name "DFFL Auto-Updater"
+          git config user.email "actions@github.com"
+          if [ -n "${{ github.event.inputs.force_week }}" ]; then
+            python update_weekly.py --week ${{ github.event.inputs.force_week }} --push
+          else
+            python update_weekly.py --push
+          fi

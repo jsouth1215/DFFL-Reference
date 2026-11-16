@@ -471,6 +471,69 @@ def load_data():
     w_df = df[base_cols_w].copy(); w_df.columns = col_names
     l_df = df[base_cols_l].copy(); l_df.columns = col_names
     games = pd.concat([w_df, l_df], ignore_index=True)
+
+    # Auto-bridge any completed weeks present in Box_Scores that aren't in MatchupHistory (.xlsb) yet
+    try:
+        b_raw = pd.read_excel("espn_fantasy_complete_stats_2017_2026.xlsx", sheet_name="Box_Scores", engine="openpyxl")
+        if not b_raw.empty and "Slot" in b_raw.columns:
+            b_raw["Season_Clean"] = b_raw["Season"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+            b_raw["Week_Clean"] = pd.to_numeric(b_raw["Week"], errors="coerce").fillna(0).astype(int)
+            existing_sw = set(
+                zip(
+                    games["Season"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip(),
+                    pd.to_numeric(games["Week"], errors="coerce").fillna(0).astype(int)
+                )
+            )
+            b_starters = b_raw[~b_raw["Slot"].astype(str).str.strip().str.upper().isin(["BE", "IR", "BENCH"])].copy()
+            b_starters["Actual_Points"] = pd.to_numeric(b_starters["Actual_Points"], errors="coerce").fillna(0.0)
+            team_wk = b_starters.groupby(
+                ["Season_Clean", "Week_Clean", "Game_Type", "Team_Name", "Opponent_Team_Name"], as_index=False
+            )["Actual_Points"].sum()
+
+            new_sw_rows = team_wk[~team_wk.apply(lambda r: (r["Season_Clean"], int(r["Week_Clean"])) in existing_sw, axis=1)].copy()
+            if not new_sw_rows.empty:
+                opp_lookup = dict(
+                    zip(
+                        zip(new_sw_rows["Season_Clean"], new_sw_rows["Week_Clean"], new_sw_rows["Team_Name"].astype(str).str.strip()),
+                        new_sw_rows["Actual_Points"]
+                    )
+                )
+                bridged = []
+                for (s_c, w_c), wk_grp in new_sw_rows.groupby(["Season_Clean", "Week_Clean"]):
+                    # Rank regular-season scores in this week to identify Top 2 and Bottom 2 matchups
+                    reg_grp = wk_grp[wk_grp["Game_Type"] == 1].sort_values("Actual_Points", ascending=False)
+                    top2_teams = set(reg_grp["Team_Name"].astype(str).str.strip().head(2)) if len(reg_grp) >= 4 else set()
+                    bot2_teams = set(reg_grp["Team_Name"].astype(str).str.strip().tail(2)) if len(reg_grp) >= 4 else set()
+
+                    for _, r in wk_grp.iterrows():
+                        tm_n = str(r["Team_Name"]).strip()
+                        opp_n = str(r["Opponent_Team_Name"]).strip()
+                        pts_self = round(float(r["Actual_Points"]), 2)
+                        pts_opp = round(float(opp_lookup.get((s_c, w_c, opp_n), 0.0)), 2)
+                        if pts_self == 0.0 and pts_opp == 0.0:
+                            continue
+                        gt_code = int(r["Game_Type"]) if pd.notna(r["Game_Type"]) else 1
+                        gt_str = "Regular Season" if gt_code == 1 else ("Playoffs" if gt_code == 2 else "Consolation")
+                        pr_str = "None" if gt_code == 1 else ("Consolation" if gt_code == 3 else "Playoffs")
+                        row_dict = {
+                            "Season": s_c,
+                            "Week": int(w_c),
+                            "Playoff_Round": pr_str,
+                            "Game_Type_Str": gt_str,
+                            "Team_Name": tm_n,
+                            "Actual_Points": pts_self,
+                            "Opponent_Team_Name": opp_n,
+                            "Opp_Points": pts_opp
+                        }
+                        if top2_col:
+                            row_dict["Top_2_Game"] = 1 if (tm_n in top2_teams and opp_n in top2_teams) else 0
+                        if bot2_col:
+                            row_dict["Bottom_2_Game"] = 1 if (tm_n in bot2_teams and opp_n in bot2_teams) else 0
+                        bridged.append(row_dict)
+                if bridged:
+                    games = pd.concat([games, pd.DataFrame(bridged)], ignore_index=True)
+    except Exception:
+        pass
     games = games.dropna(subset=['Team_Name', 'Actual_Points'])
     games = games[~((games['Actual_Points'] == 0) & (games['Opp_Points'] == 0))]
     games['Season'] = games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
