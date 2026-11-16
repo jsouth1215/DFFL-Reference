@@ -221,7 +221,7 @@ def run_playoff_odds_simulation(
             i_worst_w = min_poss_wins[i]
             i_worst_pf = cur_pf[i] + rem_games_per_team[i] * szn_min
 
-             strictly_above_i_best = sum(
+            strictly_above_i_best = sum(
                 1 for j in range(n_teams) if j != i and (
                     min_poss_wins[j] > i_best_w or (min_poss_wins[j] == i_best_w and (cur_pf[j] + rem_games_per_team[j] * szn_min) > i_best_pf)
                 )

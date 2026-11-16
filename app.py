@@ -2050,14 +2050,21 @@ elif active_tab == "Standings":
         cols_disp = ['Rank', 'Team_Name', 'W', 'L', 'T', 'Win %', 'Streak', 'PF', 'PF/G', 'PA', 'PA/G', 'Weekly Bags', 'Expected Wins', 'Luck Factor']
         hl_stnd = lambda row: ['background-color: #ebebeb; color: #888888;' if (szn_str_clean in ['2017', '2018'] and c == 'Weekly Bags') else '' for c in row.index]
 
-        if has_divisions and stnd_view_mode == "Division View":
+        stnd_tab_mode = st.radio(
+            "Display Mode:",
+            ["Standings & Playoff Odds", "Standings Only", "Playoff Odds & Moneylines Only"],
+            horizontal=True,
+            key=f"stnd_odds_toggle_{szn_str_clean}"
+        )
+
+        div_groups = None
+        if has_divisions:
             if szn_str_clean == '2017':
                 div_groups = [
                     ("Non-Cortland", ["Cav", "Jack", "Eli", "David", "Cam"]),
                     ("Cortland", ["Max", "Austin", "Sean", "Keith", "Matt"])
                 ]
             else:
-                # Reconstruct exact M.A.S. & Non-M.A.S. divisions for 2018 and 2019 from full-season W-L signature + known anchors
                 g18 = games[(games['Season'] == '2018') & (games['Game_Type'] == 1)].groupby('Team_Name')['W'].sum().to_dict()
                 g19 = games[(games['Season'] == '2019') & (games['Game_Type'] == 1)].groupby('Team_Name')['W'].sum().to_dict()
                 mas_teams = {"Jack", "Keith", "Austin", "Noah"}
@@ -2081,13 +2088,64 @@ elif active_tab == "Standings":
                     ("Non-M.A.S.", sorted(list(non_mas_teams)))
                 ]
 
-            for div_name, div_members in div_groups:
-                st.markdown(f"#### {div_name}")
-                sub_div = stnd[stnd['Team_Name'].isin(div_members)].copy().sort_values(['Win_Pct_Raw', 'PF_Raw'], ascending=[False, False]).reset_index(drop=True)
-                sub_div['Rank'] = (sub_div.index + 1).map(lambda x: f"{x}{'th' if 11 <= x % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(x % 10, 'th')}")
-                render_html_table(sub_div[cols_disp].rename(columns={'Team_Name': 'Team'}), highlight_fn=hl_stnd)
-        else:
-            render_html_table(stnd[cols_disp].rename(columns={'Team_Name': 'Team'}), highlight_fn=hl_stnd)
+        if stnd_tab_mode in ["Standings & Playoff Odds", "Standings Only"]:
+            if has_divisions and stnd_view_mode == "Division View" and div_groups:
+                for div_name, div_members in div_groups:
+                    st.markdown(f"#### {div_name}")
+                    sub_div = stnd[stnd['Team_Name'].isin(div_members)].copy().sort_values(['Win_Pct_Raw', 'PF_Raw'], ascending=[False, False]).reset_index(drop=True)
+                    sub_div['Rank'] = (sub_div.index + 1).map(lambda x: f"{x}{'th' if 11 <= x % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(x % 10, 'th')}")
+                    render_html_table(sub_div[cols_disp].rename(columns={'Team_Name': 'Team'}), highlight_fn=hl_stnd)
+            else:
+                render_html_table(stnd[cols_disp].rename(columns={'Team_Name': 'Team'}), highlight_fn=hl_stnd)
+
+        if stnd_tab_mode in ["Standings & Playoff Odds", "Playoff Odds & Moneylines Only"]:
+            import importlib
+            import odds_engine
+            importlib.reload(odds_engine)
+
+            st.markdown(f"### Monte Carlo Playoff Odds & Moneyline Board (Through Week {sel_wk})")
+            szn_records = szn_data[['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')
+            odds_df, odds_meta = odds_engine.run_playoff_odds_simulation(
+                szn_str_clean,
+                int(sel_wk),
+                szn_records,
+                div_groups=div_groups if has_divisions else None,
+                n_wl_scenarios=498,
+                n_score_passes=10
+            )
+            if not odds_df.empty:
+                rem_w = odds_meta.get('rem_weeks', 0)
+                rem_g = odds_meta.get('rem_games', 0)
+                if rem_g > 0:
+                    st.caption(
+                        f"**Simulation Engine:** `498` 50/50 W-L schedule permutations × `10` independent 3-regime scoring passes (`{odds_meta['total_runs']:,}` total runs) "
+                        f"across `{rem_g}` remaining regular-season games (`{rem_w}` weeks left). "
+                        f"Scoring regimes draw from Season Range (`{odds_meta['szn_min']:.1f}–{odds_meta['szn_max']:.1f}`), "
+                        f"League Avg ± 2σ (`{odds_meta['lg_mean']:.1f} ± {2*odds_meta['lg_sd']:.1f}`), and Team Avg ± 2σ. "
+                        f"`*` = Mathematically Clinched / Eliminated; `>99.9%` (`-10000`) / `<0.1%` (`+10000`) = 100% or 0% in sims but still mathematically live."
+                    )
+                else:
+                    st.caption("Regular season complete — all playoff seeds and outcomes are locked.")
+
+                disp_odds_cols = [
+                    'Rank', 'Team', 'Current Record', 'Current PF', 'Proj Record', 'Proj PF', 'Avg Seed',
+                    'Playoff %', 'Playoff ML', 'First-Round Bye %', 'Bye ML', '1st Seed %', '1st Seed ML', 'Last Place %', 'Last Place ML'
+                ]
+                def _hl_odds(row):
+                    styles = []
+                    po_val = str(row.get('Playoff ML', ''))
+                    for c in row.index:
+                        if c in ('Playoff %', 'Playoff ML') and po_val == 'CLINCHED':
+                            styles.append('background-color: #dcfce7; color: #166534; font-weight: 700;')
+                        elif c in ('Playoff %', 'Playoff ML') and po_val == 'ELIM':
+                            styles.append('background-color: #fee2e2; color: #991b1b;')
+                        elif c in ('Playoff ML', 'Bye ML', '1st Seed ML', 'Last Place ML'):
+                            styles.append('font-family: monospace; font-weight: 600;')
+                        else:
+                            styles.append('')
+                    return styles
+
+                render_html_table(odds_df[disp_odds_cols], highlight_fn=_hl_odds)
     else:
         st.write("No regular season data found.")
 
