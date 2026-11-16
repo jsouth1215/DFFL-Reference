@@ -353,7 +353,6 @@ def run_playoff_odds_simulation(
 def run_playoff_odds_simulation_cached(*args, **kwargs):
     import os, pickle
     
-    # Safely extract season and week for the cache key whether passed positionally or by keyword
     szn_clean = args[0] if len(args) > 0 else kwargs.get("szn_clean", "2026")
     through_wk = args[1] if len(args) > 1 else kwargs.get("through_wk", 1)
     
@@ -369,5 +368,4 @@ def run_playoff_odds_simulation_cached(*args, **kwargs):
             except Exception:
                 pass
                 
-    # Proxy all arguments to the main engine transparently
-    return run_playoff_odds_simulation(*args, **kwargs), int(through_wk), szn_records, n_wl_scenarios=n_wl_scenarios, n_score_passes=n_score_passes)
+    return run_playoff_odds_simulation(*args, **kwargs)
