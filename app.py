@@ -12,7 +12,7 @@ def _cached_read_excel(io, *args, **kwargs):
             cache_dir = os.path.join(os.path.dirname(os.path.abspath(io)), "_fast_cache")
             os.makedirs(cache_dir, exist_ok=True)
             mtime = os.path.getmtime(io)
-            sheet_key = str(kwargs.get("sheet_name", args[0] if args else 0))
+            sheet_key = f"{kwargs.get('sheet_name', args[0] if args else 0)}|h={kwargs.get('header', 0)}|u={kwargs.get('usecols', None)}|s={kwargs.get('skiprows', None)}"
             key_hash = _hashlib.md5(f"{os.path.abspath(io)}|{mtime}|{sheet_key}".encode()).hexdigest()[:16]
             pkl_path = os.path.join(cache_dir, f"{os.path.basename(io)}_{key_hash}.pkl")
             if os.path.exists(pkl_path):
