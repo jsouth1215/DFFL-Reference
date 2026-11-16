@@ -9,10 +9,14 @@ _ORIG_READ_EXCEL = pd.read_excel
 def _cached_read_excel(io, *args, **kwargs):
     if isinstance(io, str) and os.path.exists(io) and not kwargs.get("nrows"):
         try:
-            cache_dir = os.path.join(os.path.dirname(os.path.abspath(io)), "_fast_cache")
+            cache_dir = os.path.join(os.path.dirname(os.path.abspath(io)), "_fast_cache_v2")
             os.makedirs(cache_dir, exist_ok=True)
             mtime = os.path.getmtime(io)
-            sheet_key = f"{kwargs.get('sheet_name', args[0] if args else 0)}|h={kwargs.get('header', 0)}|u={kwargs.get('usecols', None)}|s={kwargs.get('skiprows', None)}"
+            sh_name = kwargs.get("sheet_name", args[0] if args else 0)
+            hdr = kwargs.get("header", 0)
+            uc = kwargs.get("usecols", None)
+            sr = kwargs.get("skiprows", None)
+            sheet_key = f"{sh_name}|h={hdr}|u={uc}|s={sr}"
             key_hash = _hashlib.md5(f"{os.path.abspath(io)}|{mtime}|{sheet_key}".encode()).hexdigest()[:16]
             pkl_path = os.path.join(cache_dir, f"{os.path.basename(io)}_{key_hash}.pkl")
             if os.path.exists(pkl_path):
@@ -23,6 +27,7 @@ def _cached_read_excel(io, *args, **kwargs):
             return df_res
         except Exception:
             return _ORIG_READ_EXCEL(io, *args, **kwargs)
+    return _ORIG_READ_EXCEL(io, *args, **kwargs)
     return _ORIG_READ_EXCEL(io, *args, **kwargs)
 
 pd.read_excel = _cached_read_excel
@@ -451,11 +456,19 @@ def load_rs_rankings(file_path, teams_list, games=None):
 @st.cache_data(ttl=600)
 def load_data():
     file_path = "FantasyOddsModel2026-v1_2.xlsb"
-    df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb")
+    df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb", header=1)
     df.columns = df.columns.astype(str).str.strip()
     if 'Winner' not in df.columns:
-        df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb", header=1)
-        df.columns = df.columns.astype(str).str.strip()
+        df0 = _ORIG_READ_EXCEL(file_path, sheet_name="MatchupHistory", engine="pyxlsb", header=None)
+        hdr_idx = 0
+        for idx_r in range(min(10, len(df0))):
+            row_vals = [str(x).strip() for x in df0.iloc[idx_r].values]
+            if 'Winner' in row_vals and 'Loser' in row_vals:
+                hdr_idx = idx_r
+                break
+        df = df0.iloc[hdr_idx + 1:].copy()
+        df.columns = [str(x).strip() for x in df0.iloc[hdr_idx].values]
+        df = df.reset_index(drop=True)
 
     top2_col = next((c for c in df.columns if 'top' in c.lower() and '2' in c.lower()), None)
     bot2_col = next((c for c in df.columns if 'bottom' in c.lower() and '2' in c.lower()), None)
