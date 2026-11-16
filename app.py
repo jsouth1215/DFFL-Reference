@@ -2340,7 +2340,7 @@ elif active_tab == "Standings":
 
             st.markdown(f"### Monte Carlo Playoff Odds & Moneyline Board (Through Week {sel_wk})")
             szn_records = szn_data[['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')
-            odds_df, odds_meta = odds_engine.run_playoff_odds_simulation(
+            odds_df, odds_meta = odds_engine.run_playoff_odds_simulation_cached(
                 szn_str_clean,
                 int(sel_wk),
                 szn_records,
