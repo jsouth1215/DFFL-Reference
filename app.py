@@ -9,7 +9,7 @@ _ORIG_READ_EXCEL = pd.read_excel
 def _cached_read_excel(io, *args, **kwargs):
     if isinstance(io, str) and os.path.exists(io) and not kwargs.get("nrows"):
         try:
-            cache_dir = os.path.join(os.path.dirname(os.path.abspath(io)), "_fast_cache_v2")
+            cache_dir = os.path.join(os.path.dirname(os.path.abspath(io)), "_fast_cache_v3")
             os.makedirs(cache_dir, exist_ok=True)
             mtime = os.path.getmtime(io)
             sh_name = kwargs.get("sheet_name", args[0] if args else 0)
@@ -28,8 +28,6 @@ def _cached_read_excel(io, *args, **kwargs):
         except Exception:
             return _ORIG_READ_EXCEL(io, *args, **kwargs)
     return _ORIG_READ_EXCEL(io, *args, **kwargs)
-    return _ORIG_READ_EXCEL(io, *args, **kwargs)
-
 pd.read_excel = _cached_read_excel
 
 import draft_tab
@@ -456,19 +454,11 @@ def load_rs_rankings(file_path, teams_list, games=None):
 @st.cache_data(ttl=600)
 def load_data():
     file_path = "FantasyOddsModel2026-v1_2.xlsb"
-    df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb", header=1)
+    df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb")
     df.columns = df.columns.astype(str).str.strip()
     if 'Winner' not in df.columns:
-        df0 = _ORIG_READ_EXCEL(file_path, sheet_name="MatchupHistory", engine="pyxlsb", header=None)
-        hdr_idx = 0
-        for idx_r in range(min(10, len(df0))):
-            row_vals = [str(x).strip() for x in df0.iloc[idx_r].values]
-            if 'Winner' in row_vals and 'Loser' in row_vals:
-                hdr_idx = idx_r
-                break
-        df = df0.iloc[hdr_idx + 1:].copy()
-        df.columns = [str(x).strip() for x in df0.iloc[hdr_idx].values]
-        df = df.reset_index(drop=True)
+        df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb", header=1)
+        df.columns = df.columns.astype(str).str.strip()
 
     top2_col = next((c for c in df.columns if 'top' in c.lower() and '2' in c.lower()), None)
     bot2_col = next((c for c in df.columns if 'bottom' in c.lower() and '2' in c.lower()), None)
