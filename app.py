@@ -2122,14 +2122,14 @@ elif active_tab == "Standings":
                         f"across `{rem_g}` remaining regular-season games (`{rem_w}` weeks left). "
                         f"Scoring regimes draw from Season Range (`{odds_meta['szn_min']:.1f}–{odds_meta['szn_max']:.1f}`), "
                         f"League Avg ± 2σ (`{odds_meta['lg_mean']:.1f} ± {2*odds_meta['lg_sd']:.1f}`), and Team Avg ± 2σ. "
-                        f"`*` = Mathematically Clinched / Eliminated; `>99.9%` (`-10000`) / `<0.1%` (`+10000`) = 100% or 0% in sims but still mathematically live."
+                        f"`*` = Mathematically Clinched / Eliminated; `>99.9%` (`-25000`) / `<0.1%` (`+25000`) = 100% or 0% in sims but still mathematically live."
                     )
                 else:
                     st.caption("Regular season complete — all playoff seeds and outcomes are locked.")
 
                 disp_odds_cols = [
-                    'Rank', 'Team', 'Current Record', 'Current PF', 'Proj Record', 'Proj PF', 'Avg Seed',
-                    'Playoff %', 'Playoff ML', 'First-Round Bye %', 'Bye ML', '1st Seed %', '1st Seed ML', 'Last Place %', 'Last Place ML'
+                    'Rank', 'Team', 'Current Record', 'Current PF', 'Avg Seed',
+                    'Playoff %', 'Playoff ML', 'First-Round Bye %', 'Bye ML', 'Last Place Game %', 'Last Place Game ML'
                 ]
                 def _hl_odds(row):
                     styles = []
@@ -2139,7 +2139,7 @@ elif active_tab == "Standings":
                             styles.append('background-color: #dcfce7; color: #166534; font-weight: 700;')
                         elif c in ('Playoff %', 'Playoff ML') and po_val == 'ELIM':
                             styles.append('background-color: #fee2e2; color: #991b1b;')
-                        elif c in ('Playoff ML', 'Bye ML', '1st Seed ML', 'Last Place ML'):
+                        elif c in ('Playoff ML', 'Bye ML', 'Last Place Game ML'):
                             styles.append('font-family: monospace; font-weight: 600;')
                         else:
                             styles.append('')

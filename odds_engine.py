@@ -2,23 +2,26 @@
 import pandas as pd
 import streamlit as st
 
+def _round5(val):
+    return int(round(val / 5.0) * 5)
+
 def prob_to_moneyline(p, is_clinched=False, is_elim=False):
     if is_clinched:
         return "CLINCHED"
     if is_elim:
         return "ELIM"
-    # Clamp empirical 0% or 100% when not mathematically locked
-    if p >= 0.9995:
-        return "-10000"
-    if p <= 0.0005:
-        return "+10000"
-    if abs(p - 0.5) < 1e-6:
+    # Cap extreme longshots / locks consistently at +/- 25000 (0.4% / 99.6% implied)
+    # so 0-hit sims never display a shorter line than a 1-hit sim!
+    p_clamped = min(max(float(p), 1.0 / 251.0), 250.0 / 251.0)
+    if abs(p_clamped - 0.5) < 1e-6:
         return "+100"
-    if p > 0.5:
-        ml = -int(round((p / (1.0 - p)) * 100.0))
-        return f"{ml}"
+    if p_clamped > 0.5:
+        raw_ml = (p_clamped / (1.0 - p_clamped)) * 100.0
+        ml = max(100, min(25000, _round5(raw_ml)))
+        return f"-{ml}"
     else:
-        ml = int(round(((1.0 - p) / p) * 100.0))
+        raw_ml = ((1.0 - p_clamped) / p_clamped) * 100.0
+        ml = max(100, min(25000, _round5(raw_ml)))
         return f"+{ml}"
 
 def fmt_prob(p, is_clinched=False, is_elim=False):
@@ -33,12 +36,6 @@ def fmt_prob(p, is_clinched=False, is_elim=False):
     return f"{p * 100.0:.1f}%"
 
 def _infer_remaining_schedule(szn_data, played_wk, reg_total_wks, teams_list):
-    """
-    Pulls remaining regular-season games (Week > played_wk) from szn_data if present.
-    If future unplayed weeks are not yet in szn_data (e.g. mid-season 2026),
-    infers remaining pairings using standard ESPN 12-team cyclic schedule rotation
-    (where Week 12+ repeats Weeks 1, 2, 3...).
-    """
     rem_pairs = []
     future_df = szn_data[szn_data["Week_Num"] > played_wk].copy()
     weeks_found = set()
@@ -60,7 +57,6 @@ def _infer_remaining_schedule(szn_data, played_wk, reg_total_wks, teams_list):
             if seen:
                 weeks_found.add(int(wk))
 
-    # For any remaining regular season week not in future_df, infer from played rotation
     played_df = szn_data[szn_data["Week_Num"] <= played_wk].copy()
     played_by_wk = {}
     pair_counts = {}
@@ -77,7 +73,7 @@ def _infer_remaining_schedule(szn_data, played_wk, reg_total_wks, teams_list):
                     pair_counts[pair] = pair_counts.get(pair, 0) + 1
 
     n_teams = len(teams_list)
-    cycle_len = max(1, n_teams - 1)  # 11 weeks for 12-team league
+    cycle_len = max(1, n_teams - 1)
 
     for wk in range(played_wk + 1, reg_total_wks + 1):
         if wk in weeks_found:
@@ -87,7 +83,6 @@ def _infer_remaining_schedule(szn_data, played_wk, reg_total_wks, teams_list):
             for p0, p1 in played_by_wk[mirror_wk]:
                 rem_pairs.append((int(wk), p0, p1))
         else:
-            # Greedy minimum-played matching fallback for unplayed cycle weeks
             avail = list(teams_list)
             while len(avail) >= 2:
                 t1 = avail.pop(0)
@@ -109,21 +104,12 @@ def run_playoff_odds_simulation(
     n_score_passes=10,
     seed=42
 ):
-    """
-    Runs the 2-layer Monte Carlo Odds Model:
-      - Layer 1: 498 independent 50/50 W-L schedule permutations across remaining games
-      - Layer 2: 10 scoring passes per scenario drawing from:
-          (a) Uniform(Season_Min, Season_Max)
-          (b) Uniform(League_Mean - 2*League_SD, League_Mean + 2*League_SD)
-          (c) Uniform(Team_Mean - 2*Team_SD, Team_Mean + 2*Team_SD)
-    """
     df_all = pd.DataFrame(szn_games_records)
     if df_all.empty:
         return pd.DataFrame(), {}
 
     szn_clean = str(szn_str).replace(".0", "").strip()
     szn_int = int(szn_clean) if szn_clean.isdigit() else 2026
-    # Standard ESPN regular season length: 14 weeks for 2021+, 13 weeks for 2012-2020
     max_wk_in_data = int(df_all["Week_Num"].max())
     reg_total_wks = max(max_wk_in_data, 14 if szn_int >= 2021 else 13)
 
@@ -135,7 +121,6 @@ def run_playoff_odds_simulation(
     n_teams = len(teams_list)
     team_to_idx = {t: i for i, t in enumerate(teams_list)}
 
-    # Current W, L, T, PF through selected week
     cur_w = np.zeros(n_teams, dtype=np.float64)
     cur_l = np.zeros(n_teams, dtype=np.float64)
     cur_t = np.zeros(n_teams, dtype=np.float64)
@@ -173,7 +158,6 @@ def run_playoff_odds_simulation(
     n_rem_games = len(rem_pairs)
     rem_wks_cnt = max(0, reg_total_wks - through_wk)
 
-    # Count remaining games per team
     rem_games_per_team = np.zeros(n_teams, dtype=int)
     for _, t1, t2 in rem_pairs:
         if t1 in team_to_idx and t2 in team_to_idx:
@@ -182,10 +166,8 @@ def run_playoff_odds_simulation(
 
     playoff_spots = 6 if n_teams >= 10 else 4
     bye_spots = 2
+    lpg_cutoff_rank = max(1, n_teams - 1)  # 11th or 12th in a 12-team league (Bottom 2)
 
-    # Deterministic Mathematical Bounds Check (Best/Worst Possible Finish)
-    # Using Graph/Opponent Bound: To check if Team i has Clinched Top K, assume Team i loses all remaining games
-    # and scores szn_min each week, while all other teams score szn_max.
     max_poss_wins = cur_w + 0.5 * cur_t + rem_games_per_team
     min_poss_wins = cur_w + 0.5 * cur_t
 
@@ -193,13 +175,10 @@ def run_playoff_odds_simulation(
     elim_playoffs = np.zeros(n_teams, dtype=bool)
     clinched_bye = np.zeros(n_teams, dtype=bool)
     elim_bye = np.zeros(n_teams, dtype=bool)
-    clinched_1st = np.zeros(n_teams, dtype=bool)
-    elim_1st = np.zeros(n_teams, dtype=bool)
-    clinched_last = np.zeros(n_teams, dtype=bool)
-    elim_last = np.zeros(n_teams, dtype=bool)
+    clinched_lpg = np.zeros(n_teams, dtype=bool)
+    elim_lpg = np.zeros(n_teams, dtype=bool)
 
     if n_rem_games == 0:
-        # Season regular season is complete -> exact ranks
         final_order = sorted(range(n_teams), key=lambda i: (cur_w[i] + 0.5 * cur_t[i], cur_pf[i]), reverse=True)
         rank_of = {tm_i: rk + 1 for rk, tm_i in enumerate(final_order)}
         for i in range(n_teams):
@@ -208,14 +187,10 @@ def run_playoff_odds_simulation(
             elim_playoffs[i] = (rk > playoff_spots)
             clinched_bye[i] = (rk <= bye_spots)
             elim_bye[i] = (rk > bye_spots)
-            clinched_1st[i] = (rk == 1)
-            elim_1st[i] = (rk > 1)
-            clinched_last[i] = (rk == n_teams)
-            elim_last[i] = (rk < n_teams)
+            clinched_lpg[i] = (rk >= lpg_cutoff_rank)
+            elim_lpg[i] = (rk < lpg_cutoff_rank)
     else:
         for i in range(n_teams):
-            # Can team i be overtaken by at least `playoff_spots` teams even if i loses out?
-            # Count how many other teams CANNOT be caught by i even if i wins out & scores szn_max
             i_best_w = max_poss_wins[i]
             i_best_pf = cur_pf[i] + rem_games_per_team[i] * szn_max
             i_worst_w = min_poss_wins[i]
@@ -252,35 +227,23 @@ def run_playoff_odds_simulation(
             if strictly_above_i_best >= bye_spots:
                 elim_bye[i] = True
 
-            if can_pass_i_worst == 0:
-                clinched_1st[i] = True
-            if strictly_above_i_best >= 1:
-                elim_1st[i] = True
+            # Bottom 2 (Last Place Game: 11th or 12th)
+            # Clinched Bottom 2 if at most 1 team can possibly finish below Team i even when Team i wins out
+            if can_fall_below_i_best <= 1:
+                clinched_lpg[i] = True
+            # Safe / Eliminated from Bottom 2 if at least 2 teams are guaranteed to finish strictly below Team i even when Team i loses out
+            if strictly_below_i_worst >= 2:
+                elim_lpg[i] = True
 
-            if can_fall_below_i_best == 0:
-                clinched_last[i] = True
-            if strictly_below_i_worst >= 1:
-                elim_last[i] = True
-
-    # Run Monte Carlo (498 W/L scenarios x 10 independent 3-regime scoring passes = 4,980 runs)
     rng = np.random.default_rng(seed + through_wk * 100 + szn_int)
-    tot_runs = n_wl_scenarios * n_score_passes if n_rem_games > 0 else 1
 
     po_counts = np.zeros(n_teams, dtype=np.int64)
     bye_counts = np.zeros(n_teams, dtype=np.int64)
-    first_counts = np.zeros(n_teams, dtype=np.int64)
-    last_counts = np.zeros(n_teams, dtype=np.int64)
-    sim_w_sum = np.zeros(n_teams, dtype=np.float64)
-    sim_pf_sum = np.zeros(n_teams, dtype=np.float64)
+    lpg_counts = np.zeros(n_teams, dtype=np.int64)
     sim_rank_sum = np.zeros(n_teams, dtype=np.float64)
 
-    # Pre-index remaining pairs
     indexed_pairs = [(team_to_idx[t1], team_to_idx[t2]) for _, t1, t2 in rem_pairs if t1 in team_to_idx and t2 in team_to_idx]
 
-    # Pre-compute scoring bounds per team for the 3 regimes:
-    # Regime 1: Uniform(szn_min, szn_max)
-    # Regime 2: Uniform(lg_mean - 2*lg_sd, lg_mean + 2*lg_sd)
-    # Regime 3: Uniform(tm_mean[i] - 2*tm_sd[i], tm_mean[i] + 2*tm_sd[i])
     lg_lo = max(30.0, lg_mean - 2.0 * lg_sd)
     lg_hi = lg_mean + 2.0 * lg_sd
     tm_lo = np.maximum(30.0, tm_mean - 2.0 * tm_sd)
@@ -311,7 +274,6 @@ def run_playoff_odds_simulation(
         for p_i in range(passes):
             pf_scen = cur_pf.copy()
             if n_rem_games > 0:
-                # For each team's remaining games, draw independent scores across the 3 regimes
                 for tm_i in range(n_teams):
                     g_rem = rem_games_per_team[tm_i]
                     if g_rem <= 0:
@@ -325,15 +287,12 @@ def run_playoff_odds_simulation(
                         else:
                             pf_scen[tm_i] += rng.uniform(tm_lo[tm_i], tm_hi[tm_i])
 
-            # Rank teams by (Wins + 0.5*Ties, Final PF)
             eff_w = w_scen + 0.5 * cur_t
             order = sorted(range(n_teams), key=lambda idx: (eff_w[idx], pf_scen[idx]), reverse=True)
 
-            # Division check: if divisions apply, check if at least 1 team from each division is in Top 6 (or promote division leader)
             if div_idx_groups:
                 top_set = set(order[:playoff_spots])
                 if not all(any(d_m in top_set for d_m in d_grp) for d_grp in div_idx_groups):
-                    # Ensure division winners are included
                     div_winners = [max(d_grp, key=lambda idx: (eff_w[idx], pf_scen[idx])) for d_grp in div_idx_groups]
                     rem_pool = [idx for idx in order if idx not in div_winners]
                     order = sorted(div_winners, key=lambda idx: (eff_w[idx], pf_scen[idx]), reverse=True) + rem_pool
@@ -342,48 +301,34 @@ def run_playoff_odds_simulation(
             for rk_pos, tm_i in enumerate(order):
                 rk = rk_pos + 1
                 sim_rank_sum[tm_i] += rk
-                sim_w_sum[tm_i] += w_scen[tm_i]
-                sim_pf_sum[tm_i] += pf_scen[tm_i]
                 if rk <= playoff_spots:
                     po_counts[tm_i] += 1
                 if rk <= bye_spots:
                     bye_counts[tm_i] += 1
-                if rk == 1:
-                    first_counts[tm_i] += 1
-                if rk == n_teams:
-                    last_counts[tm_i] += 1
+                if rk >= lpg_cutoff_rank:
+                    lpg_counts[tm_i] += 1
 
     denom = float(max(1, valid_runs))
     rows = []
     for i, tm in enumerate(teams_list):
         p_po = po_counts[i] / denom
         p_bye = bye_counts[i] / denom
-        p_1st = first_counts[i] / denom
-        p_last = last_counts[i] / denom
-
-        avg_w = sim_w_sum[i] / denom
-        avg_l = (cur_w[i] + cur_l[i] + rem_games_per_team[i]) - avg_w
-        avg_pf = sim_pf_sum[i] / denom
+        p_lpg = lpg_counts[i] / denom
         avg_rk = sim_rank_sum[i] / denom
 
         cur_rec = f"{int(cur_w[i])}-{int(cur_l[i])}" + (f"-{int(cur_t[i])}" if cur_t[i] > 0 else "")
-        proj_rec = f"{avg_w:.1f}-{avg_l:.1f}"
 
         rows.append({
             "Team": tm,
             "Current Record": cur_rec,
             "Current PF": f"{cur_pf[i]:.1f}",
-            "Proj Record": proj_rec,
-            "Proj PF": f"{avg_pf:.1f}",
             "Avg Seed": f"{avg_rk:.1f}",
             "Playoff %": fmt_prob(p_po, clinched_playoffs[i], elim_playoffs[i]),
             "Playoff ML": prob_to_moneyline(p_po, clinched_playoffs[i], elim_playoffs[i]),
             "First-Round Bye %": fmt_prob(p_bye, clinched_bye[i], elim_bye[i]),
             "Bye ML": prob_to_moneyline(p_bye, clinched_bye[i], elim_bye[i]),
-            "1st Seed %": fmt_prob(p_1st, clinched_1st[i], elim_1st[i]),
-            "1st Seed ML": prob_to_moneyline(p_1st, clinched_1st[i], elim_1st[i]),
-            "Last Place %": fmt_prob(p_last, clinched_last[i], elim_last[i]),
-            "Last Place ML": prob_to_moneyline(p_last, clinched_last[i], elim_last[i]),
+            "Last Place Game %": fmt_prob(p_lpg, clinched_lpg[i], elim_lpg[i]),
+            "Last Place Game ML": prob_to_moneyline(p_lpg, clinched_lpg[i], elim_lpg[i]),
             "_sort_po": p_po,
             "_sort_bye": p_bye,
             "_sort_w": cur_w[i],
