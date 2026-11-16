@@ -350,16 +350,24 @@ def run_playoff_odds_simulation(
     return out_df, meta
 
 
-def run_playoff_odds_simulation_cached(szn_clean, through_wk, szn_records, n_wl_scenarios=5000, n_score_passes=10):
+def run_playoff_odds_simulation_cached(*args, **kwargs):
     import os, pickle
+    
+    # Safely extract season and week for the cache key whether passed positionally or by keyword
+    szn_clean = args[0] if len(args) > 0 else kwargs.get("szn_clean", "2026")
+    through_wk = args[1] if len(args) > 1 else kwargs.get("through_wk", 1)
+    
     cache_file = "historical_odds_cache.pkl"
-    key = (str(szn_clean).replace('.0', '').strip(), int(through_wk))
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, "rb") as f:
-                cache = pickle.load(f)
-            if key in cache:
-                return cache[key]
-        except Exception:
-            pass
-    return run_playoff_odds_simulation(str(szn_clean), int(through_wk), szn_records, n_wl_scenarios=n_wl_scenarios, n_score_passes=n_score_passes)
+    if szn_clean is not None and through_wk is not None:
+        key = (str(szn_clean).replace('.0', '').strip(), int(through_wk))
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "rb") as f:
+                    cache = pickle.load(f)
+                if key in cache:
+                    return cache[key]
+            except Exception:
+                pass
+                
+    # Proxy all arguments to the main engine transparently
+    return run_playoff_odds_simulation(*args, **kwargs), int(through_wk), szn_records, n_wl_scenarios=n_wl_scenarios, n_score_passes=n_score_passes)
