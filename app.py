@@ -1,5 +1,32 @@
 import streamlit as st
 import pandas as pd
+import os
+
+# ================= FAST SIDECAR PICKLE CACHE FOR EXCEL READS =================
+import hashlib as _hashlib
+_ORIG_READ_EXCEL = pd.read_excel
+
+def _cached_read_excel(io, *args, **kwargs):
+    if isinstance(io, str) and os.path.exists(io) and not kwargs.get("nrows"):
+        try:
+            cache_dir = os.path.join(os.path.dirname(os.path.abspath(io)), "_fast_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            mtime = os.path.getmtime(io)
+            sheet_key = str(kwargs.get("sheet_name", args[0] if args else 0))
+            key_hash = _hashlib.md5(f"{os.path.abspath(io)}|{mtime}|{sheet_key}".encode()).hexdigest()[:16]
+            pkl_path = os.path.join(cache_dir, f"{os.path.basename(io)}_{key_hash}.pkl")
+            if os.path.exists(pkl_path):
+                return pd.read_pickle(pkl_path)
+            df_res = _ORIG_READ_EXCEL(io, *args, **kwargs)
+            if isinstance(df_res, pd.DataFrame):
+                df_res.to_pickle(pkl_path)
+            return df_res
+        except Exception:
+            return _ORIG_READ_EXCEL(io, *args, **kwargs)
+    return _ORIG_READ_EXCEL(io, *args, **kwargs)
+
+pd.read_excel = _cached_read_excel
+
 import draft_tab
 import players_tab
 import transactions_tab
@@ -711,6 +738,7 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
                 st.markdown("**Bench**")
                 render_html_table(o_bench, left_align_cols=['Stats'])
 
+@st.cache_data(ttl=86400, show_spinner=False)
 def get_starter_performances(box_df, games):
     if box_df.empty or games.empty: return pd.DataFrame()
     b_c = box_df.copy()
@@ -1134,22 +1162,32 @@ def render_player_records_section(box_df_in=None, preselected_rec=None):
         )
         p = get_starter_performances(b_use, games)
         if not p.empty:
+            p_valid_nfl = p[~p['NFL Team'].astype(str).str.strip().isin(['', '-', 'FA', 'NONE', 'NAN'])].copy()
+            p_valid_nfl['NFL_Clean'] = p_valid_nfl['NFL Team'].astype(str).str.strip()
+            qbs_df = p_valid_nfl[p_valid_nfl['Pos'] == 'QB']
+            cat_df = p_valid_nfl[p_valid_nfl['Pos'].isin(['WR', 'TE'])]
+            merged_stks = pd.merge(
+                qbs_df[['Season', 'Week', 'Team', 'NFL_Clean', 'Player', 'Points_Num', 'Opponent', 'Outcome']],
+                cat_df[['Season', 'Week', 'Team', 'NFL_Clean', 'Player', 'Pos', 'Points_Num']],
+                on=['Season', 'Week', 'Team', 'NFL_Clean'],
+                suffixes=('_QB', '_Cat')
+            )
+            if not merged_stks.empty:
+                merged_stks['Combined_Num'] = merged_stks['Points_Num_QB'].astype(float) + merged_stks['Points_Num_Cat'].astype(float)
+
             if stk_view == "Highest Single-Game Stacks":
                 stks = []
-                for (s, w, tm), g_df in p.groupby(['Season', 'Week', 'Team']):
-                    qbs, catchers = g_df[g_df['Pos'] == 'QB'], g_df[g_df['Pos'].isin(['WR', 'TE'])]
-                    for _, qr in qbs.iterrows():
-                        nfl = str(qr['NFL Team']).strip()
-                        if nfl and nfl not in ['-', 'FA', 'NONE', 'NAN']:
-                            for _, cr in catchers[catchers['NFL Team'].astype(str).str.strip() == nfl].iterrows():
-                                comb = float(qr['Points_Num']) + float(cr['Points_Num'])
-                                stks.append({
-                                    'QB': f"{qr['Player']} ({float(qr['Points_Num']):.1f})",
-                                    'Pass Catcher': f"{cr['Player']} ({float(cr['Points_Num']):.1f})",
-                                    'Pos': cr['Pos'], 'NFL Team': nfl, 'Combined_Num': comb,
-                                    'Combined Pts': make_box_link(f"{comb:.1f}", s, w, tm),
-                                    'Season': s, 'Week': w, 'Team': tm, 'Opponent': qr['Opponent'], 'Outcome': qr['Outcome']
-                                })
+                if not merged_stks.empty:
+                    top_m = merged_stks.sort_values(['Combined_Num', 'Season', 'Week'], ascending=[False, False, False]).head(25)
+                    for _, mr in top_m.iterrows():
+                        s, w, tm, comb = mr['Season'], mr['Week'], mr['Team'], float(mr['Combined_Num'])
+                        stks.append({
+                            'QB': f"{mr['Player_QB']} ({float(mr['Points_Num_QB']):.1f})",
+                            'Pass Catcher': f"{mr['Player_Cat']} ({float(mr['Points_Num_Cat']):.1f})",
+                            'Pos': mr['Pos'], 'NFL Team': mr['NFL_Clean'], 'Combined_Num': comb,
+                            'Combined Pts': make_box_link(f"{comb:.1f}", s, w, tm),
+                            'Season': s, 'Week': w, 'Team': tm, 'Opponent': mr['Opponent'], 'Outcome': mr['Outcome']
+                        })
                 if stks:
                     res = pd.DataFrame(stks).sort_values(['Combined_Num', 'Season', 'Week'], ascending=[False, False, False]).head(25).reset_index(drop=True)
                     res = apply_competition_rank(res, 'Combined_Num', round_digits=1)
@@ -2099,9 +2137,7 @@ elif active_tab == "Standings":
                 render_html_table(stnd[cols_disp].rename(columns={'Team_Name': 'Team'}), highlight_fn=hl_stnd)
 
         if stnd_tab_mode in ["Standings & Playoff Odds", "Playoff Odds & Moneylines Only"]:
-            import importlib
             import odds_engine
-            importlib.reload(odds_engine)
 
             st.markdown(f"### Monte Carlo Playoff Odds & Moneyline Board (Through Week {sel_wk})")
             szn_records = szn_data[['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')

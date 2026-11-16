@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import value_engine
-importlib.reload(value_engine)
+# importlib.reload(value_engine)
 
 POS_COLORS = {
     'RB': ('#cfe2f3', '#0b5394'),

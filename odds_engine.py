@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -10,8 +10,6 @@ def prob_to_moneyline(p, is_clinched=False, is_elim=False):
         return "CLINCHED"
     if is_elim:
         return "ELIM"
-    # Cap extreme longshots / locks consistently at +/- 25000 (0.4% / 99.6% implied)
-    # so 0-hit sims never display a shorter line than a 1-hit sim!
     p_clamped = min(max(float(p), 1.0 / 251.0), 250.0 / 251.0)
     if abs(p_clamped - 0.5) < 1e-6:
         return "+100"
@@ -155,18 +153,18 @@ def run_playoff_odds_simulation(
         tm_sd[i] = float(np.std(sc, ddof=1)) if len(sc) > 1 else lg_sd
 
     rem_pairs = _infer_remaining_schedule(df_all, through_wk, reg_total_wks, teams_list)
-    n_rem_games = len(rem_pairs)
+    indexed_pairs = [(team_to_idx[t1], team_to_idx[t2]) for _, t1, t2 in rem_pairs if t1 in team_to_idx and t2 in team_to_idx]
+    n_rem_games = len(indexed_pairs)
     rem_wks_cnt = max(0, reg_total_wks - through_wk)
 
     rem_games_per_team = np.zeros(n_teams, dtype=int)
-    for _, t1, t2 in rem_pairs:
-        if t1 in team_to_idx and t2 in team_to_idx:
-            rem_games_per_team[team_to_idx[t1]] += 1
-            rem_games_per_team[team_to_idx[t2]] += 1
+    for i1, i2 in indexed_pairs:
+        rem_games_per_team[i1] += 1
+        rem_games_per_team[i2] += 1
 
     playoff_spots = 6 if n_teams >= 10 else 4
     bye_spots = 2
-    lpg_cutoff_rank = max(1, n_teams - 1)  # 11th or 12th in a 12-team league (Bottom 2)
+    lpg_cutoff_rank = max(1, n_teams - 1)
 
     max_poss_wins = cur_w + 0.5 * cur_t + rem_games_per_team
     min_poss_wins = cur_w + 0.5 * cur_t
@@ -221,33 +219,16 @@ def run_playoff_odds_simulation(
                 clinched_playoffs[i] = True
             if strictly_above_i_best >= playoff_spots:
                 elim_playoffs[i] = True
-
             if can_pass_i_worst < bye_spots:
                 clinched_bye[i] = True
             if strictly_above_i_best >= bye_spots:
                 elim_bye[i] = True
-
-            # Bottom 2 (Last Place Game: 11th or 12th)
-            # Clinched Bottom 2 if at most 1 team can possibly finish below Team i even when Team i wins out
             if can_fall_below_i_best <= 1:
                 clinched_lpg[i] = True
-            # Safe / Eliminated from Bottom 2 if at least 2 teams are guaranteed to finish strictly below Team i even when Team i loses out
             if strictly_below_i_worst >= 2:
                 elim_lpg[i] = True
 
     rng = np.random.default_rng(seed + through_wk * 100 + szn_int)
-
-    po_counts = np.zeros(n_teams, dtype=np.int64)
-    bye_counts = np.zeros(n_teams, dtype=np.int64)
-    lpg_counts = np.zeros(n_teams, dtype=np.int64)
-    sim_rank_sum = np.zeros(n_teams, dtype=np.float64)
-
-    indexed_pairs = [(team_to_idx[t1], team_to_idx[t2]) for _, t1, t2 in rem_pairs if t1 in team_to_idx and t2 in team_to_idx]
-
-    lg_lo = max(30.0, lg_mean - 2.0 * lg_sd)
-    lg_hi = lg_mean + 2.0 * lg_sd
-    tm_lo = np.maximum(30.0, tm_mean - 2.0 * tm_sd)
-    tm_hi = tm_mean + 2.0 * tm_sd
 
     div_idx_groups = []
     if div_groups:
@@ -256,66 +237,75 @@ def run_playoff_odds_simulation(
             if idxs:
                 div_idx_groups.append(idxs)
 
-    valid_runs = 0
-    for sc_i in range(n_wl_scenarios if n_rem_games > 0 else 1):
-        w_scen = cur_w.copy()
-        l_scen = cur_l.copy()
-        if n_rem_games > 0:
-            flips = rng.integers(0, 2, size=len(indexed_pairs))
-            for g_idx, (i1, i2) in enumerate(indexed_pairs):
-                if flips[g_idx] == 1:
-                    w_scen[i1] += 1.0
-                    l_scen[i2] += 1.0
-                else:
-                    w_scen[i2] += 1.0
-                    l_scen[i1] += 1.0
+    if n_rem_games == 0:
+        tot_runs = 1
+        eff_w_mat = (cur_w + 0.5 * cur_t)[None, :]
+        pf_mat = cur_pf[None, :]
+    else:
+        tot_runs = n_wl_scenarios * n_score_passes
+        # 1. Vectorized Layer 1: (n_wl_scenarios, n_rem_games) coin flips -> (n_wl_scenarios, n_teams) wins
+        flips = rng.integers(0, 2, size=(n_wl_scenarios, n_rem_games))
+        t1_arr = np.array([p[0] for p in indexed_pairs], dtype=int)
+        t2_arr = np.array([p[1] for p in indexed_pairs], dtype=int)
 
-        passes = n_score_passes if n_rem_games > 0 else 1
-        for p_i in range(passes):
-            pf_scen = cur_pf.copy()
-            if n_rem_games > 0:
-                for tm_i in range(n_teams):
-                    g_rem = rem_games_per_team[tm_i]
-                    if g_rem <= 0:
-                        continue
-                    regime_choices = rng.integers(0, 3, size=g_rem)
-                    for r_c in regime_choices:
-                        if r_c == 0:
-                            pf_scen[tm_i] += rng.uniform(szn_min, szn_max)
-                        elif r_c == 1:
-                            pf_scen[tm_i] += rng.uniform(lg_lo, lg_hi)
-                        else:
-                            pf_scen[tm_i] += rng.uniform(tm_lo[tm_i], tm_hi[tm_i])
+        inc_t1 = np.zeros((n_rem_games, n_teams), dtype=np.float64)
+        inc_t2 = np.zeros((n_rem_games, n_teams), dtype=np.float64)
+        inc_t1[np.arange(n_rem_games), t1_arr] = 1.0
+        inc_t2[np.arange(n_rem_games), t2_arr] = 1.0
 
-            eff_w = w_scen + 0.5 * cur_t
-            order = sorted(range(n_teams), key=lambda idx: (eff_w[idx], pf_scen[idx]), reverse=True)
+        w_added = flips @ inc_t1 + (1 - flips) @ inc_t2
+        w_scen = cur_w[None, :] + w_added
+        eff_w_mat = np.repeat(w_scen + 0.5 * cur_t[None, :], n_score_passes, axis=0)
 
-            if div_idx_groups:
-                top_set = set(order[:playoff_spots])
-                if not all(any(d_m in top_set for d_m in d_grp) for d_grp in div_idx_groups):
-                    div_winners = [max(d_grp, key=lambda idx: (eff_w[idx], pf_scen[idx])) for d_grp in div_idx_groups]
-                    rem_pool = [idx for idx in order if idx not in div_winners]
-                    order = sorted(div_winners, key=lambda idx: (eff_w[idx], pf_scen[idx]), reverse=True) + rem_pool
+        # 2. Vectorized Layer 2: 3-Regime Scoring Draws across (tot_runs, n_teams, max_rem_g)
+        max_rem_g = int(np.max(rem_games_per_team))
+        lg_lo = max(30.0, lg_mean - 2.0 * lg_sd)
+        lg_hi = lg_mean + 2.0 * lg_sd
+        tm_lo = np.maximum(30.0, tm_mean - 2.0 * tm_sd)
+        tm_hi = tm_mean + 2.0 * tm_sd
 
-            valid_runs += 1
-            for rk_pos, tm_i in enumerate(order):
-                rk = rk_pos + 1
-                sim_rank_sum[tm_i] += rk
-                if rk <= playoff_spots:
-                    po_counts[tm_i] += 1
-                if rk <= bye_spots:
-                    bye_counts[tm_i] += 1
-                if rk >= lpg_cutoff_rank:
-                    lpg_counts[tm_i] += 1
+        regimes = rng.integers(0, 3, size=(tot_runs, n_teams, max_rem_g))
+        u = rng.random(size=(tot_runs, n_teams, max_rem_g))
 
-    denom = float(max(1, valid_runs))
+        s0 = szn_min + u * (szn_max - szn_min)
+        s1 = lg_lo + u * (lg_hi - lg_lo)
+        s2 = tm_lo[None, :, None] + u * (tm_hi - tm_lo)[None, :, None]
+
+        draws = np.where(regimes == 0, s0, np.where(regimes == 1, s1, s2))
+        valid_mask = np.arange(max_rem_g)[None, :] < rem_games_per_team[:, None]
+        pf_added = np.sum(draws * valid_mask[None, :, :], axis=2)
+        pf_mat = cur_pf[None, :] + pf_added
+
+    # 3. Vectorized Ranking across all 4,980 runs simultaneously
+    comp_score = eff_w_mat * 1e6 + pf_mat
+    if div_idx_groups and n_rem_games > 0:
+        # Boost division winner composite score if a division has no team in top 6
+        order_init = np.argsort(-comp_score, axis=1)
+        for d_grp in div_idx_groups:
+            d_arr = np.array(d_grp, dtype=int)
+            d_scores = comp_score[:, d_arr]
+            best_in_div = d_arr[np.argmax(d_scores, axis=1)]
+            # Check if best_in_div is outside top `playoff_spots`
+            Sixth_score = comp_score[np.arange(tot_runs), order_init[:, playoff_spots - 1]]
+            best_div_score = comp_score[np.arange(tot_runs), best_in_div]
+            needs_promo = best_div_score < Sixth_score
+            if np.any(needs_promo):
+                comp_score[needs_promo, best_in_div[needs_promo]] = Sixth_score[needs_promo] + 1e-2
+
+    order_mat = np.argsort(-comp_score, axis=1)
+    ranks_mat = np.argsort(order_mat, axis=1) + 1  # (tot_runs, n_teams) 1-indexed ranks
+
+    po_probs = np.mean(ranks_mat <= playoff_spots, axis=0)
+    bye_probs = np.mean(ranks_mat <= bye_spots, axis=0)
+    lpg_probs = np.mean(ranks_mat >= lpg_cutoff_rank, axis=0)
+    avg_ranks = np.mean(ranks_mat, axis=0)
+
     rows = []
     for i, tm in enumerate(teams_list):
-        p_po = po_counts[i] / denom
-        p_bye = bye_counts[i] / denom
-        p_lpg = lpg_counts[i] / denom
-        avg_rk = sim_rank_sum[i] / denom
-
+        p_po = float(po_probs[i])
+        p_bye = float(bye_probs[i])
+        p_lpg = float(lpg_probs[i])
+        avg_rk = float(avg_ranks[i])
         cur_rec = f"{int(cur_w[i])}-{int(cur_l[i])}" + (f"-{int(cur_t[i])}" if cur_t[i] > 0 else "")
 
         rows.append({
@@ -344,7 +334,7 @@ def run_playoff_odds_simulation(
     meta = {
         "n_wl_scenarios": n_wl_scenarios,
         "n_score_passes": n_score_passes,
-        "total_runs": valid_runs,
+        "total_runs": tot_runs,
         "rem_games": n_rem_games,
         "rem_weeks": rem_wks_cnt,
         "szn_min": szn_min,
