@@ -136,7 +136,8 @@ def render(box_df=None):
             "All-Time Career Leaders",
             "Single-Season Legends",
             "Weekly Boom Games & Records",
-            "Player-Manager Connection"
+            "Player-Manager Connection",
+            "Player Records"
         ],
         horizontal=True,
         key="players_main_view_v2"

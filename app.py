@@ -1068,39 +1068,57 @@ def render_franchise_starter_breakdown(d_team, box_df, games, seasons_list):
     df_nfl = apply_competition_rank(df_nfl, 'Points_Num', round_digits=1)
     render_html_table(df_nfl[['Rank', 'NFL Team', 'Starts', 'Points', 'Pts / Start', 'QB', 'RB', 'WR', 'TE', 'K', 'D/ST', 'Top Contributor']], left_align_cols=['NFL Team', 'Top Contributor'])
 
-def render_player_records_section(box_df_in=None):
+def render_player_records_section(box_df_in=None, preselected_rec=None):
     b_use = box_df_in if (box_df_in is not None and not box_df_in.empty) else box_df
-    rec_type = st.radio(
-        "Select Player Record:",
-        [
-            "Highest Scoring Players",
-            "Lowest Scoring Players",
-            "Highest Scoring Stacks",
-            "Most Unique Players Started",
-            "Least Unique Players Started",
-            "Most Fantasy Teams Started For",
-            "Started on Same Fantasy Team for 3+ NFL Teams"
-        ],
-        horizontal=True,
-        key="players_tab_rec_sub"
-    )
-    st.write("---")
+    rec_options = [
+        "Highest Scoring Players",
+        "Lowest Scoring Players",
+        "Highest Scoring Stacks",
+        "Career Total Stacks",
+        "Lowest Scoring Stacks (< 10 Pts)",
+        "Most Points in a Game from One NFL Team",
+        "Record with a 40+ Point Starter",
+        "Record with a Negative / -5 Starter",
+        "Most Unique Players Started",
+        "Least Unique Players Started",
+        "Most Fantasy Teams Started For",
+        "Started on Same Fantasy Team for 3+ NFL Teams"
+    ]
+    if preselected_rec is None:
+        rec_type = st.radio(
+            "Select Player / Lineup Record:",
+            rec_options,
+            horizontal=True,
+            key="players_tab_rec_sub"
+        )
+        st.write("---")
+    else:
+        rec_type = preselected_rec
+
     rs_map = {(str(r['Season']).replace('.0','').strip(), str(r['Team_Name']).strip()): format_ordinal(r['RS_Rank']) for _, r in rs_ranks_df.iterrows()} if not rs_ranks_df.empty and 'Team_Name' in rs_ranks_df.columns else {}
     po_all = games[games['Game_Type'] == 2]
     po_map = {(str(s).replace('.0','').strip(), str(t).strip()): get_playoff_outcome(grp) for (s, t), grp in po_all.groupby(['Season', 'Team_Name'])} if not po_all.empty else {}
 
+    def _is_win_loss(outcome_val):
+        s_out = str(outcome_val).strip().upper()
+        if s_out.startswith("W"): return "W"
+        if s_out.startswith("L"): return "L"
+        if s_out.startswith("T"): return "T"
+        return ""
+
     if rec_type == "Highest Scoring Players":
         p = get_starter_performances(b_use, games)
         if not p.empty:
-            top = p.sort_values(['Points_Num', 'Season', 'Week'], ascending=[False, False, False]).head(15).reset_index(drop=True)
+            top = p.sort_values(['Points_Num', 'Season', 'Week'], ascending=[False, False, False]).head(20).reset_index(drop=True)
             top = apply_competition_rank(top, 'Points_Num', round_digits=1)
             top['Points'] = top.apply(lambda r: make_box_link(f"{float(r['Points_Num']):.1f}", r['Season'], r['Week'], r['Team']), axis=1)
             render_html_table(top[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
+
     elif rec_type == "Lowest Scoring Players":
         p = get_starter_performances(b_use, games)
         if not p.empty:
             st.write("### Lowest Scoring Starters (All Positions)")
-            low = p.sort_values(['Points_Num', 'Season', 'Week'], ascending=[True, False, False]).head(15).reset_index(drop=True)
+            low = p.sort_values(['Points_Num', 'Season', 'Week'], ascending=[True, False, False]).head(20).reset_index(drop=True)
             low = apply_competition_rank(low, 'Points_Num', round_digits=1)
             low['Points'] = low.apply(lambda r: make_box_link(f"{float(r['Points_Num']):.1f}", r['Season'], r['Week'], r['Team']), axis=1)
             render_html_table(low[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
@@ -1110,15 +1128,17 @@ def render_player_records_section(box_df_in=None):
                 neg = apply_competition_rank(neg, 'Points_Num', round_digits=1)
                 neg['Points'] = neg.apply(lambda r: make_box_link(f"{float(r['Points_Num']):.1f}", r['Season'], r['Week'], r['Team']), axis=1)
                 render_html_table(neg[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
+
     elif rec_type == "Highest Scoring Stacks":
         p = get_starter_performances(b_use, games)
         if not p.empty:
+            st.caption("Single-game highest combined points by a starting QB and starting WR/TE from the same NFL team in a game that counts.")
             stks = []
             for (s, w, tm), g_df in p.groupby(['Season', 'Week', 'Team']):
                 qbs, catchers = g_df[g_df['Pos'] == 'QB'], g_df[g_df['Pos'].isin(['WR', 'TE'])]
                 for _, qr in qbs.iterrows():
                     nfl = str(qr['NFL Team']).strip()
-                    if nfl and nfl not in ['-', 'FA']:
+                    if nfl and nfl not in ['-', 'FA', 'NONE', 'NAN']:
                         for _, cr in catchers[catchers['NFL Team'].astype(str).str.strip() == nfl].iterrows():
                             comb = float(qr['Points_Num']) + float(cr['Points_Num'])
                             stks.append({
@@ -1129,9 +1149,293 @@ def render_player_records_section(box_df_in=None):
                                 'Season': s, 'Week': w, 'Team': tm, 'Opponent': qr['Opponent'], 'Outcome': qr['Outcome']
                             })
             if stks:
-                res = pd.DataFrame(stks).sort_values(['Combined_Num', 'Season', 'Week'], ascending=[False, False, False]).head(15).reset_index(drop=True)
+                res = pd.DataFrame(stks).sort_values(['Combined_Num', 'Season', 'Week'], ascending=[False, False, False]).head(25).reset_index(drop=True)
                 res = apply_competition_rank(res, 'Combined_Num', round_digits=1)
                 render_html_table(res[['Rank', 'QB', 'Pass Catcher', 'Pos', 'NFL Team', 'Combined Pts', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
+
+    elif rec_type == "Career Total Stacks":
+        p = get_starter_performances(b_use, games)
+        if not p.empty:
+            st.caption("Cumulative career stats when both the QB and WR/TE from the same NFL team are in a manager's starting lineup simultaneously in a game that counts.")
+            stk_mode = st.radio("Stack Grouping:", ["By Manager + QB/Pass Catcher Duo", "All-Time Duo (Across All Managers)"], horizontal=True, key="career_stk_mode")
+            raw_pairs = []
+            for (s, w, tm), g_df in p.groupby(['Season', 'Week', 'Team']):
+                qbs, catchers = g_df[g_df['Pos'] == 'QB'], g_df[g_df['Pos'].isin(['WR', 'TE'])]
+                for _, qr in qbs.iterrows():
+                    nfl = str(qr['NFL Team']).strip()
+                    if nfl and nfl not in ['-', 'FA', 'NONE', 'NAN']:
+                        for _, cr in catchers[catchers['NFL Team'].astype(str).str.strip() == nfl].iterrows():
+                            q_pts = float(qr['Points_Num'])
+                            c_pts = float(cr['Points_Num'])
+                            wl = _is_win_loss(qr['Outcome'])
+                            raw_pairs.append({
+                                'Manager': str(tm).strip(),
+                                'QB': str(qr['Player']).strip(),
+                                'Catcher': str(cr['Player']).strip(),
+                                'Pos': str(cr['Pos']).strip(),
+                                'NFL': nfl,
+                                'Season': str(s).strip(),
+                                'Week': int(w),
+                                'QB_Pts': q_pts,
+                                'Catcher_Pts': c_pts,
+                                'Comb_Pts': q_pts + c_pts,
+                                'W': 1 if wl == 'W' else 0,
+                                'L': 1 if wl == 'L' else 0,
+                                'T': 1 if wl == 'T' else 0
+                            })
+            if raw_pairs:
+                rp_df = pd.DataFrame(raw_pairs)
+                grp_cols = ['Manager', 'QB', 'Catcher', 'Pos'] if stk_mode.startswith("By Manager") else ['QB', 'Catcher', 'Pos']
+                career_rows = []
+                for keys, grp in rp_df.groupby(grp_cols):
+                    starts = len(grp)
+                    tot_comb = grp['Comb_Pts'].sum()
+                    tot_q = grp['QB_Pts'].sum()
+                    tot_c = grp['Catcher_Pts'].sum()
+                    best_row = grp.sort_values('Comb_Pts', ascending=False).iloc[0]
+                    w_c, l_c, t_c = int(grp['W'].sum()), int(grp['L'].sum()), int(grp['T'].sum())
+                    rec_str = f"{w_c}-{l_c}" + (f"-{t_c}" if t_c > 0 else "")
+                    nfl_list = ", ".join(sorted(set(grp['NFL'])))
+                    szn_list = ", ".join(sorted(set(grp['Season'])))
+                    row_d = {
+                        'QB': grp['QB'].iloc[0],
+                        'Pass Catcher': grp['Catcher'].iloc[0],
+                        'Pos': grp['Pos'].iloc[0],
+                        'NFL Team': nfl_list,
+                        'Starts Together': starts,
+                        'Record': rec_str,
+                        'Combined_Num': tot_comb,
+                        'Total Combined Pts': f"{tot_comb:,.1f}",
+                        'QB Pts': f"{tot_q:,.1f}",
+                        'Rec Pts': f"{tot_c:,.1f}",
+                        'Avg Stack / Gm': f"{tot_comb / starts:.1f}",
+                        'Best Game': make_box_link(f"{best_row['Comb_Pts']:.1f} ({best_row['Season']} W{best_row['Week']})", best_row['Season'], best_row['Week'], best_row['Manager']),
+                        'Seasons': szn_list
+                    }
+                    if stk_mode.startswith("By Manager"):
+                        row_d['Team'] = grp['Manager'].iloc[0]
+                    else:
+                        row_d['Managers'] = ", ".join(sorted(set(grp['Manager'])))
+                    career_rows.append(row_d)
+                c_df = pd.DataFrame(career_rows).sort_values(['Combined_Num', 'Starts Together'], ascending=[False, False]).head(30).reset_index(drop=True)
+                c_df = apply_competition_rank(c_df, 'Combined_Num', round_digits=1)
+                if stk_mode.startswith("By Manager"):
+                    cols_show = ['Rank', 'Team', 'QB', 'Pass Catcher', 'Pos', 'NFL Team', 'Starts Together', 'Record', 'Total Combined Pts', 'QB Pts', 'Rec Pts', 'Avg Stack / Gm', 'Best Game', 'Seasons']
+                else:
+                    cols_show = ['Rank', 'QB', 'Pass Catcher', 'Pos', 'NFL Team', 'Starts Together', 'Record', 'Total Combined Pts', 'QB Pts', 'Rec Pts', 'Avg Stack / Gm', 'Best Game', 'Managers']
+                render_html_table(c_df[cols_show], left_align_cols=['Seasons', 'Managers'])
+
+    elif rec_type == "Lowest Scoring Stacks (< 10 Pts)":
+        p = get_starter_performances(b_use, games)
+        if not p.empty:
+            st.caption("Single-game starting QB + starting WR/TE stacks from the same NFL team that combined for strictly under 10.0 points in a game that counts.")
+            low_stks = []
+            for (s, w, tm), g_df in p.groupby(['Season', 'Week', 'Team']):
+                qbs, catchers = g_df[g_df['Pos'] == 'QB'], g_df[g_df['Pos'].isin(['WR', 'TE'])]
+                for _, qr in qbs.iterrows():
+                    nfl = str(qr['NFL Team']).strip()
+                    if nfl and nfl not in ['-', 'FA', 'NONE', 'NAN']:
+                        for _, cr in catchers[catchers['NFL Team'].astype(str).str.strip() == nfl].iterrows():
+                            comb = float(qr['Points_Num']) + float(cr['Points_Num'])
+                            if comb < 10.0:
+                                wl = _is_win_loss(qr['Outcome'])
+                                low_stks.append({
+                                    'QB': f"{qr['Player']} ({float(qr['Points_Num']):.1f})",
+                                    'Pass Catcher': f"{cr['Player']} ({float(cr['Points_Num']):.1f})",
+                                    'Pos': cr['Pos'], 'NFL Team': nfl, 'Combined_Num': comb,
+                                    'Combined Pts': make_box_link(f"{comb:.1f}", s, w, tm),
+                                    'Season': s, 'Week': w, 'Team': tm, 'Opponent': qr['Opponent'],
+                                    'Outcome': qr['Outcome'], 'WL': wl
+                                })
+            if low_stks:
+                ls_df = pd.DataFrame(low_stks).sort_values(['Combined_Num', 'Season', 'Week'], ascending=[True, False, False]).reset_index(drop=True)
+                ls_df = apply_competition_rank(ls_df, 'Combined_Num', round_digits=1)
+                w_tot = sum(1 for x in low_stks if x['WL'] == 'W')
+                l_tot = sum(1 for x in low_stks if x['WL'] == 'L')
+                st.markdown(f"**League-Wide Record When Starting a Sub-10 Point Stack:** **`{w_tot}-{l_tot}`** ({w_tot / max(1, w_tot+l_tot)*100:.1f}% Win Rate across {len(low_stks)} instances)")
+                render_html_table(ls_df[['Rank', 'QB', 'Pass Catcher', 'Pos', 'NFL Team', 'Combined Pts', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
+            else:
+                st.info("No starting stacks under 10.0 combined points found.")
+
+    elif rec_type == "Most Points in a Game from One NFL Team":
+        p = get_starter_performances(b_use, games)
+        if not p.empty:
+            st.caption("Most combined points scored in a single game by starters from the same NFL team in one fantasy lineup.")
+            min_p = st.radio("Minimum Starters from Same NFL Team:", ["2+ Starters", "3+ Starters", "1+ Starters (Includes Solo)"], horizontal=True, key="one_nfl_min_p")
+            min_cnt = 2 if min_p.startswith("2") else (3 if min_p.startswith("3") else 1)
+            nfl_games = []
+            for (s, w, tm, nfl), grp in p.groupby(['Season', 'Week', 'Team', 'NFL Team']):
+                nfl_str = str(nfl).strip()
+                if not nfl_str or nfl_str in ['-', 'FA', 'NONE', 'NAN']:
+                    continue
+                if len(grp) < min_cnt:
+                    continue
+                tot_pts = float(grp['Points_Num'].sum())
+                grp_sorted = grp.sort_values('Points_Num', ascending=False)
+                breakdown = ", ".join([f"{r['Player']} ({r['Pos']}, {float(r['Points_Num']):.1f})" for _, r in grp_sorted.iterrows()])
+                nfl_games.append({
+                    'NFL Team': nfl_str,
+                    'Starters': len(grp),
+                    'Points_Num': tot_pts,
+                    'Combined Pts': make_box_link(f"{tot_pts:.1f}", s, w, tm),
+                    'Starters Breakdown': breakdown,
+                    'Season': s, 'Week': w, 'Team': tm,
+                    'Opponent': grp['Opponent'].iloc[0],
+                    'Outcome': grp['Outcome'].iloc[0]
+                })
+            if nfl_games:
+                ng_df = pd.DataFrame(nfl_games).sort_values(['Points_Num', 'Starters', 'Season'], ascending=[False, False, False]).head(25).reset_index(drop=True)
+                ng_df = apply_competition_rank(ng_df, 'Points_Num', round_digits=1)
+                render_html_table(ng_df[['Rank', 'NFL Team', 'Starters', 'Combined Pts', 'Starters Breakdown', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']], left_align_cols=['Starters Breakdown'])
+
+    elif rec_type == "Record with a 40+ Point Starter":
+        p = get_starter_performances(b_use, games)
+        if not p.empty:
+            st.caption("Manager win-loss records and full game log when starting a player who scores 40.0+ points in a game that counts.")
+            p40 = p[p['Points_Num'] >= 40.0].sort_values(['Points_Num', 'Season', 'Week'], ascending=[False, False, False]).copy()
+            if not p40.empty:
+                game_40 = {}
+                for _, r in p40.iterrows():
+                    g_key = (str(r['Season']), int(r['Week']), str(r['Team']))
+                    wl = _is_win_loss(r['Outcome'])
+                    if g_key not in game_40:
+                        game_40[g_key] = {'Team': str(r['Team']), 'WL': wl, 'Players': []}
+                    game_40[g_key]['Players'].append(f"{r['Player']} ({float(r['Points_Num']):.1f})")
+
+                mgr_stats = {}
+                for m_name in sorted(p['Team'].dropna().unique()):
+                    mgr_stats[str(m_name)] = {'W': 0, 'L': 0, 'T': 0, 'Count_40_Players': 0, 'Best': 0.0, 'Best_Str': '-'}
+
+                for _, r in p40.iterrows():
+                    tm_s = str(r['Team'])
+                    mgr_stats.setdefault(tm_s, {'W': 0, 'L': 0, 'T': 0, 'Count_40_Players': 0, 'Best': 0.0, 'Best_Str': '-'})
+                    mgr_stats[tm_s]['Count_40_Players'] += 1
+                    pts_v = float(r['Points_Num'])
+                    if pts_v > mgr_stats[tm_s]['Best']:
+                        mgr_stats[tm_s]['Best'] = pts_v
+                        mgr_stats[tm_s]['Best_Str'] = f"{r['Player']} ({pts_v:.1f}, {r['Season']} W{r['Week']})"
+
+                for g_key, g_info in game_40.items():
+                    tm_s = g_info['Team']
+                    if g_info['WL'] == 'W': mgr_stats[tm_s]['W'] += 1
+                    elif g_info['WL'] == 'L': mgr_stats[tm_s]['L'] += 1
+                    elif g_info['WL'] == 'T': mgr_stats[tm_s]['T'] += 1
+
+                sum_rows = []
+                for tm_s, st_d in mgr_stats.items():
+                    g_tot = st_d['W'] + st_d['L'] + st_d['T']
+                    if g_tot == 0:
+                        continue
+                    wp = (st_d['W'] + 0.5 * st_d['T']) / g_tot * 100.0
+                    sum_rows.append({
+                        'Team': tm_s,
+                        '40+ Pt Games': g_tot,
+                        '40+ Pt Starters': st_d['Count_40_Players'],
+                        'Record': f"{st_d['W']}-{st_d['L']}" + (f"-{st_d['T']}" if st_d['T'] > 0 else ""),
+                        'Win %': f"{wp:.1f}%",
+                        'Wins_Num': st_d['W'],
+                        'Games_Num': g_tot,
+                        'Highest 40+ Starter': st_d['Best_Str']
+                    })
+                sum_df = pd.DataFrame(sum_rows).sort_values(['Games_Num', 'Wins_Num'], ascending=[False, False]).reset_index(drop=True)
+                sum_df = apply_competition_rank(sum_df, 'Games_Num', round_digits=0)
+                tot_w = sum(x['Wins_Num'] for x in sum_rows)
+                tot_g = sum(x['Games_Num'] for x in sum_rows)
+                st.write(f"### Franchise Records When Starting a 40+ Point Player (League-Wide: `{tot_w}-{tot_g - tot_w}` | `{tot_w/max(1,tot_g)*100:.1f}%`)")
+                render_html_table(sum_df[['Rank', 'Team', '40+ Pt Games', 'Record', 'Win %', 'Highest 40+ Starter']], left_align_cols=['Highest 40+ Starter'])
+
+                st.write("### All 40+ Point Starter Performances (Games That Count)")
+                p40_disp = p40.reset_index(drop=True)
+                p40_disp = apply_competition_rank(p40_disp, 'Points_Num', round_digits=1)
+                p40_disp['Points'] = p40_disp.apply(lambda r: make_box_link(f"{float(r['Points_Num']):.1f}", r['Season'], r['Week'], r['Team']), axis=1)
+                render_html_table(p40_disp[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
+            else:
+                st.info("No 40+ point starter performances found.")
+
+    elif rec_type == "Record with a Negative / -5 Starter":
+        p = get_starter_performances(b_use, games)
+        if not p.empty:
+            st.caption("Manager win-loss records and game logs when starting any player or D/ST with Negative (< 0.0 pts) or -5.0 or Worse (<= -5.0 pts) in a game that counts.")
+            neg_mode = st.radio(
+                "Negative Starter Filter:",
+                [
+                    "Any Negative Starter (< 0.0 Pts, All Positions)",
+                    "Negative Non-D/ST Starter (< 0.0 Pts, Skill & K)",
+                    "Negative D/ST (< 0.0 Pts)",
+                    "-5 or Worse Starter (<= -5.0 Pts, Any Pos)"
+                ],
+                horizontal=True,
+                key="neg_starter_mode"
+            )
+
+            is_dst_pos = p['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])
+            if neg_mode.startswith("Any Negative"):
+                neg_sub = p[p['Points_Num'] < 0.0].copy()
+                lbl_hdr = "Any Negative Starter (< 0.0 Pts)"
+            elif neg_mode.startswith("Negative Non-D/ST"):
+                neg_sub = p[(~is_dst_pos) & (p['Points_Num'] < 0.0)].copy()
+                lbl_hdr = "Negative Non-D/ST Starter (< 0.0 Pts)"
+            elif neg_mode.startswith("Negative D/ST"):
+                neg_sub = p[is_dst_pos & (p['Points_Num'] < 0.0)].copy()
+                lbl_hdr = "Negative D/ST (< 0.0 Pts)"
+            else:
+                neg_sub = p[p['Points_Num'] <= -5.0].copy()
+                lbl_hdr = "-5.0 or Worse Starter (<= -5.0 Pts)"
+
+            neg_sub = neg_sub.sort_values(['Points_Num', 'Season', 'Week'], ascending=[True, False, False]).copy()
+
+            if not neg_sub.empty:
+                game_neg = {}
+                mgr_d = {}
+                for _, r in neg_sub.iterrows():
+                    tm_s = str(r['Team'])
+                    g_key = (str(r['Season']), int(r['Week']), tm_s)
+                    wl = _is_win_loss(r['Outcome'])
+                    if g_key not in game_neg:
+                        game_neg[g_key] = {'Team': tm_s, 'WL': wl}
+                    if tm_s not in mgr_d:
+                        mgr_d[tm_s] = {'W': 0, 'L': 0, 'T': 0, 'Starters': 0, 'Worst': 999.0, 'Worst_Str': '-'}
+                    mgr_d[tm_s]['Starters'] += 1
+                    pts_v = float(r['Points_Num'])
+                    if pts_v < mgr_d[tm_s]['Worst']:
+                        mgr_d[tm_s]['Worst'] = pts_v
+                        mgr_d[tm_s]['Worst_Str'] = f"{r['Player']} ({r['Pos']}, {pts_v:.1f}, {r['Season']} W{r['Week']})"
+
+                for g_key, g_info in game_neg.items():
+                    tm_s = g_info['Team']
+                    if g_info['WL'] == 'W': mgr_d[tm_s]['W'] += 1
+                    elif g_info['WL'] == 'L': mgr_d[tm_s]['L'] += 1
+                    elif g_info['WL'] == 'T': mgr_d[tm_s]['T'] += 1
+
+                d_rows = []
+                for tm_s, st_d in mgr_d.items():
+                    g_tot = st_d['W'] + st_d['L'] + st_d['T']
+                    wp = (st_d['W'] + 0.5 * st_d['T']) / max(1, g_tot) * 100.0
+                    d_rows.append({
+                        'Team': tm_s,
+                        'Games': g_tot,
+                        'Neg Starters': st_d['Starters'],
+                        'Record': f"{st_d['W']}-{st_d['L']}" + (f"-{st_d['T']}" if st_d['T'] > 0 else ""),
+                        'Win %': f"{wp:.1f}%",
+                        'Wins_Num': st_d['W'],
+                        'Games_Num': g_tot,
+                        'Worst Start': st_d['Worst_Str']
+                    })
+                d_df = pd.DataFrame(d_rows).sort_values(['Games_Num', 'Wins_Num'], ascending=[False, False]).reset_index(drop=True)
+                d_df = apply_competition_rank(d_df, 'Games_Num', round_digits=0)
+                tw = sum(x['Wins_Num'] for x in d_rows)
+                tg = sum(x['Games_Num'] for x in d_rows)
+                st.write(f"### Franchise Records When Starting a {lbl_hdr} (League-Wide: `{tw}-{tg - tw}` | `{tw/max(1,tg)*100:.1f}%`)")
+                render_html_table(d_df[['Rank', 'Team', 'Games', 'Neg Starters', 'Record', 'Win %', 'Worst Start']], left_align_cols=['Worst Start'])
+
+                st.write(f"### All {lbl_hdr} Performances (Games That Count)")
+                neg_disp = neg_sub.reset_index(drop=True)
+                neg_disp = apply_competition_rank(neg_disp, 'Points_Num', round_digits=1)
+                neg_disp['Points'] = neg_disp.apply(lambda r: make_box_link(f"{float(r['Points_Num']):.1f}", r['Season'], r['Week'], r['Team']), axis=1)
+                render_html_table(neg_disp[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
+            else:
+                st.info("No matching negative starter performances found.")
+
     elif rec_type in ["Most Unique Players Started", "Least Unique Players Started"]:
         is_least = (rec_type == "Least Unique Players Started")
         st_data, name_col = get_unique_starters_records(b_use, games, completed_only=is_least, completed_playoff_seasons=completed_playoff_seasons)
@@ -1150,6 +1454,7 @@ def render_player_records_section(box_df_in=None):
                 df = pd.DataFrame(rows).sort_values(['Players Started', 'Season'], ascending=[is_least, False]).head(15).reset_index(drop=True)
                 df = apply_competition_rank(df, 'Players Started', round_digits=0)
                 render_html_table(df[['Rank', 'Season', 'Team', 'Players Started', 'Regular Season Finish', 'Playoff Outcome', 'Player List']], left_align_cols=['Player List'])
+
     elif rec_type == "Most Fantasy Teams Started For":
         p = get_starter_performances(b_use, games)
         if not p.empty:
@@ -1158,6 +1463,7 @@ def render_player_records_section(box_df_in=None):
                 df = pd.DataFrame(trav).sort_values(['Teams Count', 'Player'], ascending=[False, True]).head(15).reset_index(drop=True)
                 df = apply_competition_rank(df, 'Teams Count', round_digits=0)
                 render_html_table(df[['Rank', 'Player', 'Pos', 'Teams Count', 'Fantasy Teams']], left_align_cols=['Fantasy Teams'])
+
     elif rec_type == "Started on Same Fantasy Team for 3+ NFL Teams":
         p = get_starter_performances(b_use, games)
         if not p.empty:
@@ -1868,6 +2174,20 @@ elif active_tab == "Records":
             "Playoff Record by Team",
             "Longest Head-to-Head Streaks"
         ],
+        "Player & Lineup Records": [
+            "Highest Scoring Players",
+            "Lowest Scoring Players",
+            "Highest Scoring Stacks",
+            "Career Total Stacks",
+            "Lowest Scoring Stacks (< 10 Pts)",
+            "Most Points in a Game from One NFL Team",
+            "Record with a 40+ Point Starter",
+            "Record with a Negative / -5 Starter",
+            "Most Unique Players Started",
+            "Least Unique Players Started",
+            "Most Fantasy Teams Started For",
+            "Started on Same Fantasy Team for 3+ NFL Teams"
+        ],
         "Other": [
             "Weekly Scoring Rank Heatmap",
             "NFL Franchise Usage Matrix (12 Teams x 32 NFL Teams)"
@@ -2099,108 +2419,21 @@ elif active_tab == "Records":
             bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
             render_html_table(bot2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}))
 
-    elif rec_type == "Highest Scoring Players":
-        p = get_starter_performances(box_df, games)
-        if not p.empty:
-            top = p.sort_values(['Points_Num', 'Season', 'Week'], ascending=[False, False, False]).head(15).reset_index(drop=True)
-            top = apply_competition_rank(top, 'Points_Num', round_digits=1)
-            top['Points'] = top['Points_Num'].apply(lambda x: f"{float(x):.1f}")
-            render_html_table(top[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
-
-    elif rec_type == "Lowest Scoring Players":
-        p = get_starter_performances(box_df, games)
-        if not p.empty:
-            st.write("### Lowest Scoring Starters (All Positions)")
-            low = p.sort_values(['Points_Num', 'Season', 'Week'], ascending=[True, False, False]).head(15).reset_index(drop=True)
-            low = apply_competition_rank(low, 'Points_Num', round_digits=1)
-            low['Points'] = low['Points_Num'].apply(lambda x: f"{float(x):.1f}")
-            render_html_table(low[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
-
-            st.write("### Negative Point Starters (Non-Defense)")
-            neg = p[(~p['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])) & (p['Points_Num'] < 0)].sort_values(['Points_Num', 'Season', 'Week'], ascending=[True, False, False]).reset_index(drop=True)
-            if not neg.empty:
-                neg = apply_competition_rank(neg, 'Points_Num', round_digits=1)
-                neg['Points'] = neg['Points_Num'].apply(lambda x: f"{float(x):.1f}")
-                render_html_table(neg[['Rank', 'Player', 'Pos', 'NFL Team', 'Points', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
-
-    elif rec_type == "Highest Scoring Stacks":
-        p = get_starter_performances(box_df, games)
-        if not p.empty:
-            stks = []
-            for (s, w, tm), g_df in p.groupby(['Season', 'Week', 'Team']):
-                qbs, catchers = g_df[g_df['Pos'] == 'QB'], g_df[g_df['Pos'].isin(['WR', 'TE'])]
-                for _, qr in qbs.iterrows():
-                    nfl = str(qr['NFL Team']).strip()
-                    if nfl and nfl not in ['-', 'FA']:
-                        for _, cr in catchers[catchers['NFL Team'].astype(str).str.strip() == nfl].iterrows():
-                            comb = float(qr['Points_Num']) + float(cr['Points_Num'])
-                            stks.append({
-                                'QB': f"{qr['Player']} ({float(qr['Points_Num']):.1f})",
-                                'Pass Catcher': f"{cr['Player']} ({float(cr['Points_Num']):.1f})",
-                                'Pos': cr['Pos'],
-                                'NFL Team': nfl,
-                                'Combined_Num': comb,
-                                'Combined Pts': f"{comb:.1f}",
-                                'Season': s,
-                                'Week': w,
-                                'Team': tm,
-                                'Opponent': qr['Opponent'],
-                                'Outcome': qr['Outcome']
-                            })
-            if stks:
-                res = pd.DataFrame(stks).sort_values(['Combined_Num', 'Season', 'Week'], ascending=[False, False, False]).head(15).reset_index(drop=True)
-                res = apply_competition_rank(res, 'Combined_Num', round_digits=1)
-                render_html_table(res[['Rank', 'QB', 'Pass Catcher', 'Pos', 'NFL Team', 'Combined Pts', 'Season', 'Week', 'Team', 'Opponent', 'Outcome']])
-
-    elif rec_type in ["Most Unique Players Started", "Least Unique Players Started"]:
-        is_least = (rec_type == "Least Unique Players Started")
-        st_data, name_col = get_unique_starters_records(box_df, games, completed_only=is_least, completed_playoff_seasons=completed_playoff_seasons)
-        if not st_data.empty:
-            pf = st.radio("Position Filter:", ["All Positions", "QB", "RB", "WR", "TE", "K", "D/ST"], horizontal=True, key=f"pos_{rec_type}")
-            sub = st_data if pf == "All Positions" else st_data[st_data['Clean_Pos'] == pf]
-            rows = []
-            for (s, tm), grp in sub.groupby(['Season_Str', 'Team_Str']):
-                pl = sorted(list(set(str(x).strip() for x in grp[name_col].dropna().unique() if str(x).strip())))
-                rows.append({
-                    'Season': s,
-                    'Team': tm,
-                    'Players Started': len(pl),
-                    'Regular Season Finish': rs_map.get((s, tm), ""),
-                    'Playoff Outcome': po_map.get((s, tm), ""),
-                    'Player List': ", ".join(pl)
-                })
-            if rows:
-                df = pd.DataFrame(rows).sort_values(['Players Started', 'Season'], ascending=[is_least, False]).head(15).reset_index(drop=True)
-                df = apply_competition_rank(df, 'Players Started', round_digits=0)
-                render_html_table(df[['Rank', 'Season', 'Team', 'Players Started', 'Regular Season Finish', 'Playoff Outcome', 'Player List']], left_align_cols=['Player List'])
-
-    elif rec_type == "Most Fantasy Teams Started For":
-        p = get_starter_performances(box_df, games)
-        if not p.empty:
-            trav = [{'Player': pl, 'Pos': grp['Pos'].mode().iloc[0], 'Teams Count': len(set(grp['Team'])), 'Fantasy Teams': ", ".join(sorted(set(grp['Team'])))} for pl, grp in p[~p['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])].groupby('Player') if len(set(grp['Team'])) > 1]
-            if trav:
-                df = pd.DataFrame(trav).sort_values(['Teams Count', 'Player'], ascending=[False, True]).head(15).reset_index(drop=True)
-                df = apply_competition_rank(df, 'Teams Count', round_digits=0)
-                render_html_table(df[['Rank', 'Player', 'Pos', 'Teams Count', 'Fantasy Teams']], left_align_cols=['Fantasy Teams'])
-
-    elif rec_type == "Started on Same Fantasy Team for 3+ NFL Teams":
-        p = get_starter_performances(box_df, games)
-        if not p.empty:
-            journeys = []
-            for (pl, tm), grp in p[~p['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])].groupby(['Player', 'Team']):
-                nfls = sorted(set(t for t in grp['NFL Team'] if t and t not in ['-', 'FA', 'NONE']))
-                if len(nfls) >= 3:
-                    journeys.append({
-                        'Player': pl,
-                        'Pos': grp['Pos'].mode().iloc[0],
-                        'Fantasy Team': tm,
-                        'NFL Teams Count': len(nfls),
-                        'NFL Teams': ", ".join(nfls)
-                    })
-            if journeys:
-                df = pd.DataFrame(journeys).sort_values(['NFL Teams Count', 'Player'], ascending=[False, True]).reset_index(drop=True)
-                df = apply_competition_rank(df, 'NFL Teams Count', round_digits=0)
-                render_html_table(df[['Rank', 'Player', 'Pos', 'Fantasy Team', 'NFL Teams Count', 'NFL Teams']], left_align_cols=['NFL Teams'])
+    elif rec_type in [
+        "Highest Scoring Players",
+        "Lowest Scoring Players",
+        "Highest Scoring Stacks",
+        "Career Total Stacks",
+        "Lowest Scoring Stacks (< 10 Pts)",
+        "Most Points in a Game from One NFL Team",
+        "Record with a 40+ Point Starter",
+        "Record with a Negative / -5 Starter",
+        "Most Unique Players Started",
+        "Least Unique Players Started",
+        "Most Fantasy Teams Started For",
+        "Started on Same Fantasy Team for 3+ NFL Teams"
+    ]:
+        render_player_records_section(box_df, preselected_rec=rec_type)
 
     elif rec_type == "Most Points Per Game in a Season":
         if not s_agg.empty:
