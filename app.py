@@ -805,6 +805,127 @@ def display_box_score(b_season, b_week, b_team, box_df, games):
                 render_html_table(o_bench, left_align_cols=['Stats'])
 
 @st.cache_data(ttl=86400, show_spinner=False)
+def get_drafted_never_dropped_never_started(box_df, games, include_active=False):
+    import re
+    def _norm_p(s):
+        s = str(s).lower().strip()
+        s = re.sub(r"\b(jr|sr|ii|iii|iv|v)\b\.?", "", s)
+        s = re.sub(r"[^a-z0-9]", "", s)
+        return s
+
+    try:
+        d_raw = pd.read_excel("Draft History.xlsx", header=1)
+    except Exception:
+        return pd.DataFrame()
+
+    d_raw.columns = [str(c).strip() for c in d_raw.columns]
+    if "Year" not in d_raw.columns or "Player" not in d_raw.columns:
+        return pd.DataFrame()
+
+    d_raw = d_raw.dropna(subset=["Year", "Team", "Player"]).copy()
+    d_raw["Season_Str"] = d_raw["Year"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    d_raw["Team_Str"] = d_raw["Team"].astype(str).str.strip()
+    d_raw["Player_Str"] = d_raw["Player"].astype(str).str.strip()
+    d_raw["Player_Norm"] = d_raw["Player_Str"].map(_norm_p)
+    d_raw["Round_Num"] = pd.to_numeric(d_raw["Round"], errors="coerce").fillna(99).astype(int)
+    d_raw["Pick_Num"] = pd.to_numeric(d_raw["Overall Pick"], errors="coerce").fillna(999).astype(int)
+
+    # Load transactions to check explicit drops/trades out
+    dropped_or_traded = set()
+    for tx_fn in ["espn_transactions_2018.xlsx", "espn_transactions_2019_2026.xlsx"]:
+        if os.path.exists(tx_fn):
+            try:
+                tx = pd.read_excel(tx_fn)
+                if not tx.empty and "Season" in tx.columns and "Player" in tx.columns:
+                    tx["S_Str"] = tx["Season"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+                    tx["P_Norm"] = tx["Player"].astype(str).map(_norm_p)
+                    act_col = tx["Action"].astype(str).str.upper() if "Action" in tx.columns else pd.Series("", index=tx.index)
+                    from_col = tx["From_Team"].astype(str).str.strip() if "From_Team" in tx.columns else (tx["Team"].astype(str).str.strip() if "Team" in tx.columns else pd.Series("", index=tx.index))
+                    bad_mask = act_col.str.contains("DROP|TRADE|WAIVER") | (from_col != "Free Agency / Waivers")
+                    for s_v, f_v, p_v, a_v in zip(tx["S_Str"], from_col, tx["P_Norm"], act_col):
+                        if a_v in ("DROP", "TRADED", "TRADE") or (f_v and f_v != "Free Agency / Waivers" and a_v != "ADD"):
+                            dropped_or_traded.add((s_v, f_v, p_v))
+            except Exception:
+                pass
+
+    b = box_df.copy()
+    slot_c = "Slot" if "Slot" in b.columns else ("Lineup_Slot" if "Lineup_Slot" in b.columns else "Position")
+    name_c = "Player_Name" if "Player_Name" in b.columns else "Player"
+    pts_c = "Actual_Points" if "Actual_Points" in b.columns else "Points"
+
+    b["Season_Str"] = b["Season"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    b["Week_Num"] = pd.to_numeric(b["Week"], errors="coerce").fillna(0).astype(int)
+    b["Team_Str"] = b["Team_Name"].astype(str).str.strip()
+    b["Player_Norm"] = b[name_c].astype(str).map(_norm_p)
+    b["Slot_Clean"] = b[slot_c].astype(str).str.strip().str.upper()
+    b["Pts_Num"] = pd.to_numeric(b[pts_c], errors="coerce").fillna(0.0)
+    b["Is_Bench"] = b["Slot_Clean"].isin(["BE", "IR", "BENCH", "RES"])
+
+    # Determine each team's final active week in each season
+    team_max_wk = b.groupby(["Season_Str", "Team_Str"])["Week_Num"].max().to_dict()
+    team_tot_wks = b.groupby(["Season_Str", "Team_Str"])["Week_Num"].nunique().to_dict()
+
+    # Group box score appearances by (Season_Str, Player_Norm)
+    p_szn_teams = b.groupby(["Season_Str", "Player_Norm"])["Team_Str"].unique().to_dict()
+
+    # Group by (Season_Str, Team_Str, Player_Norm)
+    grp_stats = b.groupby(["Season_Str", "Team_Str", "Player_Norm"]).agg(
+        Weeks_Rostered=("Week_Num", "nunique"),
+        Max_Wk=("Week_Num", "max"),
+        Min_Wk=("Week_Num", "min"),
+        Starts=("Is_Bench", lambda s: int((~s).sum())),
+        Bench_Pts=("Pts_Num", "sum")
+    ).to_dict("index")
+
+    out_rows = []
+    for _, dr in d_raw.iterrows():
+        s_str = dr["Season_Str"]
+        if not include_active and s_str == "2026":
+            continue
+        tm_str = dr["Team_Str"]
+        p_norm = dr["Player_Norm"]
+        p_disp = dr["Player_Str"]
+        pos_disp = str(dr.get("Position", "")).strip()
+
+        # Must not have been dropped or traded away by that team in transaction logs
+        if (s_str, tm_str, p_norm) in dropped_or_traded:
+            continue
+
+        # Must have box score data for that team and 0 starts
+        st_info = grp_stats.get((s_str, tm_str, p_norm))
+        if not st_info or st_info["Starts"] > 0:
+            continue
+
+        # Must never have appeared on another fantasy team's roster that season
+        other_tms = [t for t in p_szn_teams.get((s_str, p_norm), []) if t != tm_str]
+        if other_tms:
+            continue
+
+        # Verify they were still on the roster in the team's final week of the season (and rostered practically every week)
+        tm_last_wk = team_max_wk.get((s_str, tm_str), 14)
+        tm_n_wks = team_tot_wks.get((s_str, tm_str), 14)
+        if st_info["Max_Wk"] < tm_last_wk or st_info["Weeks_Rostered"] < max(1, tm_n_wks - 1):
+            continue
+
+        out_rows.append({
+            "Season": s_str,
+            "Team": tm_str,
+            "Player": p_disp,
+            "Pos": pos_disp,
+            "Draft Capital": f"Rd {dr['Round_Num']}, Pick {dr['Pick_Num']}",
+            "Weeks Held (Bench/IR)": st_info["Weeks_Rostered"],
+            "Starts": 0,
+            "Bench Points": f"{st_info['Bench_Pts']:.1f}",
+            "Bench_Pts_Num": float(st_info["Bench_Pts"]),
+            "Round_Num": dr["Round_Num"],
+            "Pick_Num": dr["Pick_Num"]
+        })
+
+    if not out_rows:
+        return pd.DataFrame()
+    return pd.DataFrame(out_rows).sort_values(["Round_Num", "Pick_Num", "Season"], ascending=[True, True, False]).reset_index(drop=True)
+
+@st.cache_data(ttl=86400, show_spinner=False)
 def get_starter_performances(box_df, games):
     if box_df.empty or games.empty: return pd.DataFrame()
     b_c = box_df.copy()
@@ -1481,7 +1602,8 @@ def render_player_records_section(box_df_in=None, preselected_rec=None):
                 "Most Unique Players Started",
                 "Least Unique Players Started",
                 "Most Fantasy Teams Started For",
-                "Started on Same Fantasy Team for 3+ NFL Teams"
+                "Started on Same Fantasy Team for 3+ NFL Teams",
+                "Drafted, Never Dropped & Never Started"
             ],
             horizontal=True,
             key="ms_sub_mode"
@@ -1512,7 +1634,7 @@ def render_player_records_section(box_df_in=None, preselected_rec=None):
                     df = pd.DataFrame(trav).sort_values(['Teams Count', 'Player'], ascending=[False, True]).head(15).reset_index(drop=True)
                     df = apply_competition_rank(df, 'Teams Count', round_digits=0)
                     render_html_table(df[['Rank', 'Player', 'Pos', 'Teams Count', 'Fantasy Teams']], left_align_cols=['Fantasy Teams'])
-        else:
+        elif ms_mode == "Started on Same Fantasy Team for 3+ NFL Teams":
             p = get_starter_performances(b_use, games)
             if not p.empty:
                 journeys = []
@@ -1524,6 +1646,17 @@ def render_player_records_section(box_df_in=None, preselected_rec=None):
                     df = pd.DataFrame(journeys).sort_values(['NFL Teams Count', 'Player'], ascending=[False, True]).reset_index(drop=True)
                     df = apply_competition_rank(df, 'NFL Teams Count', round_digits=0)
                     render_html_table(df[['Rank', 'Player', 'Pos', 'Fantasy Team', 'NFL Teams Count', 'NFL Teams']], left_align_cols=['NFL Teams'])
+        elif ms_mode == "Drafted, Never Dropped & Never Started":
+            inc_26 = st.checkbox("Include active 2026 season (through current week)", value=False, key="bw_inc_2026")
+            bw_df = get_drafted_never_dropped_never_started(box_df, games, include_active=inc_26)
+            if not bw_df.empty:
+                st.caption("Players drafted by a manager, held on that same roster for the entire season without ever being dropped or traded, and never placed in the starting lineup (`0` starts).")
+                bw_df = apply_competition_rank(bw_df, 'Pick_Num', round_digits=0)
+                bw_df['Regular Season Finish'] = bw_df.apply(lambda r: rs_map.get((str(r['Season']).strip(), str(r['Team']).strip()), ""), axis=1)
+                bw_df['Playoff Outcome'] = bw_df.apply(lambda r: po_map.get((str(r['Season']).strip(), str(r['Team']).strip()), ""), axis=1)
+                render_html_table(bw_df[['Rank', 'Season', 'Team', 'Player', 'Pos', 'Draft Capital', 'Weeks Held (Bench/IR)', 'Bench Points', 'Regular Season Finish', 'Playoff Outcome']])
+            else:
+                st.info("No players found matching Drafted, Never Dropped & Never Started.")
 
 # ================= GLOBAL DATA INITIALIZATION =================
 st.title("DFFL Reference")
@@ -2256,6 +2389,8 @@ elif active_tab == "Records":
         "Game Records": [
             "Highest Scoring Weeks",
             "Lowest Scoring Weeks",
+            "Highest Scoring Losses",
+            "Lowest Scoring Wins",
             "Lowest Scoring Weekly Bags",
             "Largest Monday Night Comebacks",
             "Biggest Blowouts",
@@ -2459,6 +2594,26 @@ elif active_tab == "Records":
         df['Result'] = df.apply(lambda r: "W" if r.get('W') == 1 else ("L" if r.get('L') == 1 else "T"), axis=1)
         render_html_table(df[['Rank', 'Season', 'Week', 'Team_Name', 'Points', 'Opponent_Team_Name', 'Opponent Score', 'Result']].rename(columns={'Team_Name': 'Team', 'Opponent_Team_Name': 'Opponent'}))
 
+    elif rec_type == "Highest Scoring Losses":
+        df = games[(games['L'] == 1) & (games['Game_Type'].isin([1, 2]))].copy()
+        df['Points_Num'] = pd.to_numeric(df['Actual_Points'], errors='coerce')
+        df = df.sort_values(['Points_Num', 'Season_Num', 'Week_Num'], ascending=[False, False, False]).head(15).reset_index(drop=True)
+        df = apply_competition_rank(df, 'Points_Num', round_digits=1)
+        df['Loser Pts'] = df.apply(lambda r: make_box_link(f"{float(r['Points_Num']):.1f}", r['Season'], r['Week'], r['Team_Name']), axis=1)
+        df['Winner Pts'] = df.apply(lambda r: make_box_link(f"{float(r['Opp_Points']):.1f}", r['Season'], r['Week'], r['Opponent_Team_Name']), axis=1)
+        df['Margin'] = df['Margin'].apply(lambda x: f"{float(x):.1f}")
+        render_html_table(df[['Rank', 'Season', 'Week', 'Team_Name', 'Loser Pts', 'Opponent_Team_Name', 'Winner Pts', 'Margin']].rename(columns={'Team_Name': 'Loser', 'Opponent_Team_Name': 'Winner'}))
+
+    elif rec_type == "Lowest Scoring Wins":
+        df = games[(games['W'] == 1) & (games['Actual_Points'] > 0) & (games['Game_Type'].isin([1, 2]))].copy()
+        df['Points_Num'] = pd.to_numeric(df['Actual_Points'], errors='coerce')
+        df = df.sort_values(['Points_Num', 'Season_Num', 'Week_Num'], ascending=[True, False, False]).head(15).reset_index(drop=True)
+        df = apply_competition_rank(df, 'Points_Num', round_digits=1)
+        df['Winner Pts'] = df.apply(lambda r: make_box_link(f"{float(r['Points_Num']):.1f}", r['Season'], r['Week'], r['Team_Name']), axis=1)
+        df['Loser Pts'] = df.apply(lambda r: make_box_link(f"{float(r['Opp_Points']):.1f}", r['Season'], r['Week'], r['Opponent_Team_Name']), axis=1)
+        df['Margin'] = df['Margin'].apply(lambda x: f"{float(x):.1f}")
+        render_html_table(df[['Rank', 'Season', 'Week', 'Team_Name', 'Winner Pts', 'Opponent_Team_Name', 'Loser Pts', 'Margin']].rename(columns={'Team_Name': 'Winner', 'Opponent_Team_Name': 'Loser'}))
+
     elif rec_type == "Lowest Scoring Weekly Bags":
         df = games[games['Is_High_Scorer']].copy()
         if not df.empty:
@@ -2502,23 +2657,23 @@ elif active_tab == "Records":
 
     elif rec_type == "Top 2 Matchups":
         if 'Top_2_Game' in games.columns:
-            top2_mask = games['Top_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
+            top2_mask = games['Top_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y']) & (games['W'] == 1)
             top2 = games[top2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
             top2['Season'] = top2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            top2['Actual_Points'] = top2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-            top2['Opp_Points'] = top2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+            top2['Winner Pts'] = top2.apply(lambda r: make_box_link(f"{float(r['Actual_Points']):.1f}", r['Season'], r['Week'], r['Team_Name']), axis=1)
+            top2['Loser Pts'] = top2.apply(lambda r: make_box_link(f"{float(r['Opp_Points']):.1f}", r['Season'], r['Week'], r['Opponent_Team_Name']), axis=1)
             top2['Margin'] = top2['Margin'].apply(lambda x: f"{float(x):.1f}")
-            render_html_table(top2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}))
+            render_html_table(top2[['Season', 'Week', 'Team_Name', 'Winner Pts', 'Opponent_Team_Name', 'Loser Pts', 'Margin']].rename(columns={'Team_Name': 'Winner', 'Opponent_Team_Name': 'Loser'}))
 
     elif rec_type == "Bottom 2 Matchups":
         if 'Bottom_2_Game' in games.columns:
-            bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y'])
+            bot2_mask = games['Bottom_2_Game'].astype(str).str.strip().str.lower().isin(['1', '1.0', 'yes', 'true', 'y']) & (games['W'] == 1)
             bot2 = games[bot2_mask].sort_values(['Season_Num', 'Week_Num'], ascending=[False, False]).drop_duplicates(subset=['Season', 'Week']).copy()
             bot2['Season'] = bot2['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            bot2['Actual_Points'] = bot2['Actual_Points'].apply(lambda x: f"{float(x):.1f}")
-            bot2['Opp_Points'] = bot2['Opp_Points'].apply(lambda x: f"{float(x):.1f}")
+            bot2['Winner Pts'] = bot2.apply(lambda r: make_box_link(f"{float(r['Actual_Points']):.1f}", r['Season'], r['Week'], r['Team_Name']), axis=1)
+            bot2['Loser Pts'] = bot2.apply(lambda r: make_box_link(f"{float(r['Opp_Points']):.1f}", r['Season'], r['Week'], r['Opponent_Team_Name']), axis=1)
             bot2['Margin'] = bot2['Margin'].apply(lambda x: f"{float(x):.1f}")
-            render_html_table(bot2[['Season', 'Week', 'Team_Name', 'Actual_Points', 'Opponent_Team_Name', 'Opp_Points', 'Margin']].rename(columns={'Team_Name': 'Team 1', 'Actual_Points': 'Team 1 Pts', 'Opponent_Team_Name': 'Team 2', 'Opp_Points': 'Team 2 Pts'}))
+            render_html_table(bot2[['Season', 'Week', 'Team_Name', 'Winner Pts', 'Opponent_Team_Name', 'Loser Pts', 'Margin']].rename(columns={'Team_Name': 'Winner', 'Opponent_Team_Name': 'Loser'}))
 
     elif rec_type in [
         "Single-Game Player Records",
