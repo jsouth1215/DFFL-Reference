@@ -2345,7 +2345,7 @@ elif active_tab == "Standings":
                 int(sel_wk),
                 szn_records,
                 div_groups=div_groups if has_divisions else None,
-                n_wl_scenarios=498,
+                n_wl_scenarios=5000,
                 n_score_passes=10
             )
             if not odds_df.empty:
@@ -2353,7 +2353,7 @@ elif active_tab == "Standings":
                 rem_g = odds_meta.get('rem_games', 0)
                 if rem_g > 0:
                     st.caption(
-                        f"**Simulation Engine:** `498` 50/50 W-L schedule permutations × `10` independent 3-regime scoring passes (`{odds_meta['total_runs']:,}` total runs) "
+                        f"**Simulation Engine:** `5,000` 50/50 W-L schedule permutations × `10` independent 3-regime scoring passes (`{odds_meta['total_runs']:,}` total runs) "
                         f"across `{rem_g}` remaining regular-season games (`{rem_w}` weeks left). "
                         f"Scoring regimes draw from Season Range (`{odds_meta['szn_min']:.1f}–{odds_meta['szn_max']:.1f}`), "
                         f"League Avg ± 2σ (`{odds_meta['lg_mean']:.1f} ± {2*odds_meta['lg_sd']:.1f}`), and Team Avg ± 2σ. "

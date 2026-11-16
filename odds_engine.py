@@ -33,7 +33,11 @@ def fmt_prob(p, is_clinched=False, is_elim=False):
         return "<0.1%"
     return f"{p * 100.0:.1f}%"
 
-def _infer_remaining_schedule(szn_data, played_wk, reg_total_wks, teams_list):
+EXACT_2026_SCHEDULE = [(1, 'Cav', 'Brett'), (1, 'Lukas', 'Noah'), (1, 'David', 'Keith'), (1, 'Jack', 'Max'), (1, 'Austin', 'Matt'), (1, 'Sean', 'Eli'), (2, 'Brett', 'Noah'), (2, 'Keith', 'Cav'), (2, 'Max', 'Lukas'), (2, 'Matt', 'David'), (2, 'Eli', 'Jack'), (2, 'Sean', 'Austin'), (3, 'Keith', 'Brett'), (3, 'Noah', 'Max'), (3, 'Cav', 'Matt'), (3, 'Lukas', 'Eli'), (3, 'David', 'Sean'), (3, 'Jack', 'Austin'), (4, 'Brett', 'Max'), (4, 'Matt', 'Keith'), (4, 'Eli', 'Noah'), (4, 'Sean', 'Cav'), (4, 'Austin', 'Lukas'), (4, 'Jack', 'David'), (5, 'Matt', 'Brett'), (5, 'Max', 'Eli'), (5, 'Keith', 'Sean'), (5, 'Noah', 'Austin'), (5, 'Cav', 'Jack'), (5, 'Lukas', 'David'), (6, 'Brett', 'Eli'), (6, 'Sean', 'Matt'), (6, 'Austin', 'Max'), (6, 'Jack', 'Keith'), (6, 'David', 'Noah'), (6, 'Lukas', 'Cav'), (7, 'Sean', 'Brett'), (7, 'Eli', 'Austin'), (7, 'Matt', 'Jack'), (7, 'Max', 'David'), (7, 'Keith', 'Lukas'), (7, 'Noah', 'Cav'), (8, 'Brett', 'Austin'), (8, 'Jack', 'Sean'), (8, 'David', 'Eli'), (8, 'Lukas', 'Matt'), (8, 'Cav', 'Max'), (8, 'Noah', 'Keith'), (9, 'Jack', 'Brett'), (9, 'Austin', 'David'), (9, 'Sean', 'Lukas'), (9, 'Eli', 'Cav'), (9, 'Matt', 'Noah'), (9, 'Max', 'Keith'), (10, 'Brett', 'David'), (10, 'Lukas', 'Jack'), (10, 'Cav', 'Austin'), (10, 'Noah', 'Sean'), (10, 'Keith', 'Eli'), (10, 'Max', 'Matt'), (11, 'Brett', 'David'), (11, 'Lukas', 'Jack'), (11, 'Cav', 'Austin'), (11, 'Noah', 'Sean'), (11, 'Keith', 'Eli'), (11, 'Max', 'Matt'), (12, 'Brett', 'David'), (12, 'Lukas', 'Jack'), (12, 'Cav', 'Austin'), (12, 'Noah', 'Sean'), (12, 'Keith', 'Eli'), (12, 'Max', 'Matt'), (13, 'Brett', 'David'), (13, 'Lukas', 'Jack'), (13, 'Cav', 'Austin'), (13, 'Noah', 'Sean'), (13, 'Keith', 'Eli'), (13, 'Max', 'Matt'), (14, 'Brett', 'David'), (14, 'Lukas', 'Jack'), (14, 'Cav', 'Austin'), (14, 'Noah', 'Sean'), (14, 'Keith', 'Eli'), (14, 'Max', 'Matt')]
+
+def _infer_remaining_schedule(szn_data, played_wk, reg_total_wks, teams_list, szn_clean="2026"):
+    if str(szn_clean) == "2026" and EXACT_2026_SCHEDULE:
+        return [(wk, t1, t2) for (wk, t1, t2) in EXACT_2026_SCHEDULE if played_wk < wk <= reg_total_wks]
     rem_pairs = []
     future_df = szn_data[szn_data["Week_Num"] > played_wk].copy()
     weeks_found = set()
@@ -98,7 +102,7 @@ def run_playoff_odds_simulation(
     through_wk,
     szn_games_records,
     div_groups=None,
-    n_wl_scenarios=498,
+    n_wl_scenarios=5000,
     n_score_passes=10,
     seed=42
 ):
@@ -152,7 +156,7 @@ def run_playoff_odds_simulation(
         tm_mean[i] = float(np.mean(sc)) if sc else lg_mean
         tm_sd[i] = float(np.std(sc, ddof=1)) if len(sc) > 1 else lg_sd
 
-    rem_pairs = _infer_remaining_schedule(df_all, through_wk, reg_total_wks, teams_list)
+    rem_pairs = _infer_remaining_schedule(df_all, through_wk, reg_total_wks, teams_list, szn_clean=szn_clean)
     indexed_pairs = [(team_to_idx[t1], team_to_idx[t2]) for _, t1, t2 in rem_pairs if t1 in team_to_idx and t2 in team_to_idx]
     n_rem_games = len(indexed_pairs)
     rem_wks_cnt = max(0, reg_total_wks - through_wk)
