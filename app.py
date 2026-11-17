@@ -457,7 +457,32 @@ def load_data():
     df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb")
     df.columns = df.columns.astype(str).str.strip()
     if 'Winner' not in df.columns:
-        df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb", header=1)
+    df = pd.read_excel(file_path, sheet_name="MatchupHistory", engine="pyxlsb")
+    if os.path.exists("live_override.csv"):
+        try:
+            _lo = pd.read_csv("live_override.csv")
+            _lo_wins = _lo[_lo["W"] == 1].copy()
+            _cols = [c.strip() for c in df.columns.astype(str)]
+            # Check if header was on row 1 instead of row 0
+            if "Winner" in _cols:
+                df = df[~((df["Year"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip() == "2026") & (pd.to_numeric(df["Matchup Week"], errors="coerce") == 10))]
+                _new_rows = []
+                for _, _r in _lo_wins.iterrows():
+                    _nr = {c: None for c in df.columns}
+                    for c in df.columns:
+                        cs = str(c).strip()
+                        if cs == "Year": _nr[c] = 2026
+                        elif cs == "Matchup Week": _nr[c] = 10
+                        elif cs in ["Game Type", "Game_Type", "Type"]: _nr[c] = 1
+                        elif cs == "Winner": _nr[c] = _r["Team_Name"]
+                        elif cs == "Winning Score": _nr[c] = float(_r["Actual_Points"])
+                        elif cs == "Loser": _nr[c] = _r["Opponent_Team_Name"]
+                        elif cs == "Losing Score": _nr[c] = float(_r["Opp_Points"])
+                    _new_rows.append(_nr)
+                if _new_rows:
+                    df = pd.concat([df, pd.DataFrame(_new_rows)], ignore_index=True)
+        except Exception as _e:
+            print("Raw MatchupHistory patch error:", _e)
         df.columns = df.columns.astype(str).str.strip()
 
     top2_col = next((c for c in df.columns if 'top' in c.lower() and '2' in c.lower()), None)
