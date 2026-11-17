@@ -538,6 +538,30 @@ def load_data():
     except Exception:
         pass
     games = games.dropna(subset=['Team_Name', 'Actual_Points'])
+    # --- IN-PLACE LIVE WEEK 10 PATCH ---
+    if os.path.exists("live_override.csv"):
+        try:
+            _lo = pd.read_csv("live_override.csv")
+            _pts_map = dict(zip(_lo["Team_Name"].str.strip(), _lo["Actual_Points"]))
+            _opp_map = dict(zip(_lo["Team_Name"].str.strip(), _lo["Opponent_Team_Name"].str.strip()))
+            _m10 = (games["Season"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip() == "2026") & (pd.to_numeric(games["Week"], errors="coerce") == 10)
+            if _m10.any():
+                for _idx in games[_m10].index:
+                    _tm = str(games.at[_idx, "Team_Name"]).strip()
+                    _op = str(games.at[_idx, "Opponent_Team_Name"]).strip()
+                    if _tm in _pts_map:
+                        _p1 = float(_pts_map[_tm])
+                        _p2 = float(_pts_map.get(_op, _pts_map.get(_opp_map.get(_tm, ""), 0.0)))
+                        games.at[_idx, "Actual_Points"] = _p1
+                        games.at[_idx, "Opp_Points"] = _p2
+                        games.at[_idx, "Game_Type"] = 1
+                        games.at[_idx, "W"] = 1 if _p1 > _p2 else 0
+                        games.at[_idx, "L"] = 1 if _p1 < _p2 else 0
+                        games.at[_idx, "T"] = 1 if _p1 == _p2 else 0
+                        games.at[_idx, "Margin"] = abs(_p1 - _p2)
+        except Exception as _e:
+            print("In-place override error:", _e)
+    # -----------------------------------
     games = games[~((games['Actual_Points'] == 0) & (games['Opp_Points'] == 0))]
     games['Season'] = games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     games = games[games['Team_Name'].str.upper() != 'BYE']
@@ -1662,14 +1686,22 @@ def render_player_records_section(box_df_in=None, preselected_rec=None):
 st.title("DFFL Reference")
 
 games = load_data()
-if os.path.exists("live_override.csv"):
-    try:
-        _live_df = pd.read_csv("live_override.csv")
-        games = games[~((games["Season"].astype(str).str.contains("2026")) & (pd.to_numeric(games["Week"], errors="coerce") == 10))]
-        games = pd.concat([games, _live_df], ignore_index=True)
-    except Exception as _e:
-        print("Override failed:", _e)
 box_df = load_box_scores()
+if os.path.exists("live_override.csv") and not box_df.empty:
+    try:
+        _lo = pd.read_csv("live_override.csv")
+        _opp_map = dict(zip(_lo["Team_Name"].str.strip(), _lo["Opponent_Team_Name"].str.strip()))
+        _b10 = (box_df["Season"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip() == "2026") & (pd.to_numeric(box_df["Week"], errors="coerce") == 10)
+        if _b10.any():
+            for _col in ["Opponent_Team_Name", "Opponent", "Opp_Team_Name", "Opp"]:
+                if _col in box_df.columns:
+                    box_df.loc[_b10, _col] = box_df.loc[_b10, "Team_Name"].astype(str).str.strip().map(_opp_map)
+            if "Matchup" in box_df.columns:
+                box_df.loc[_b10, "Matchup"] = box_df.loc[_b10, "Team_Name"].astype(str).str.strip().apply(
+                    lambda t: " vs. ".join(sorted([t, _opp_map.get(t, "")])) if t in _opp_map else t
+                )
+    except Exception as _e:
+        print("Box score pairing patch error:", _e)
 game_top_map = get_game_top_scorers(box_df)
 
 teams = sorted(games['Team_Name'].dropna().unique().tolist())
