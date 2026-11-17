@@ -73,7 +73,7 @@ def render_html_table(df, highlight_fn=None, left_align_cols=None):
             ('color', '#0f172a'),
             ('font-weight', '700'),
             ('font-size', '13px'),
-            ('white-space': 'nowrap')
+            ('white-space', 'nowrap')
         ]},
         {'selector': 'tbody tr:nth-child(even)', 'props': [('background-color', '#fcfcfd')]},
         {'selector': 'table', 'props': [
