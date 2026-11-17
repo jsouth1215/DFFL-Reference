@@ -8,11 +8,14 @@ def generate_recap(szn="2026", wk=None):
     games = app.games
     box = app.box_df
     
-    # Clean up games data
-    comp_games = games[games['Game_Type'].isin([1, 2])].copy()
+    # 1. FIX: Include Game_Type 0 (Unplayed/Live) IF they have Actual_Points > 0 so we can preview the recap before ESPN officially rolls over the week!
+    comp_games = games[games['Game_Type'].isin([0, 1, 2])].copy()
     comp_games['Season_Str'] = comp_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     comp_games['Week_Num'] = pd.to_numeric(comp_games['Week'], errors='coerce')
     comp_games['Pts_Num'] = pd.to_numeric(comp_games['Actual_Points'], errors='coerce')
+    
+    # Filter out actual unplayed future games
+    comp_games = comp_games[comp_games['Pts_Num'] > 0]
     
     if wk is None:
         szn_games = comp_games[comp_games['Season_Str'] == szn]
@@ -43,7 +46,6 @@ def generate_recap(szn="2026", wk=None):
         w_tm = g['Team_Name']
         l_tm = g['Opponent_Team_Name']
         
-        # H2H (All-Time)
         h2h = comp_games[((comp_games['Team_Name'] == w_tm) & (comp_games['Opponent_Team_Name'] == l_tm))]
         w_wins = h2h['W'].sum()
         l_wins = h2h['L'].sum()
@@ -102,7 +104,8 @@ def generate_recap(szn="2026", wk=None):
     # 5. Playoff Odds Changes & Clinches
     recap_lines.append("🔮 **Playoff Odds Watch (Week-Over-Week):**")
     try:
-        szn_g = comp_games[(comp_games['Season_Str'] == szn) & (comp_games['Game_Type'] == 1)]
+        # For odds, only count Game_Type 1 (and our Live Week as Game_Type 1 for the sim)
+        szn_g = comp_games[(comp_games['Season_Str'] == szn) & (comp_games['Game_Type'].isin([0, 1]))].copy()
         
         recs_curr = szn_g[szn_g['Week_Num'] <= wk][['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')
         odds_curr, _ = odds_engine.run_playoff_odds_simulation_cached(szn, wk, recs_curr, n_wl_scenarios=5000)
@@ -143,16 +146,16 @@ def generate_recap(szn="2026", wk=None):
     recap_lines.append("")
 
     # 6. Expanded Record Book Watch
-    top15_alltime = comp_games['Pts_Num'].nlargest(15).min()
-    bot15_alltime = comp_games[comp_games['Pts_Num'] > 0]['Pts_Num'].nsmallest(15).max()
+    top15_alltime = hist['Pts_Num'].nlargest(15).min()
+    bot15_alltime = hist[hist['Pts_Num'] > 0]['Pts_Num'].nsmallest(15).max()
     
-    losses = comp_games[comp_games['L'] == 1]
-    wins = comp_games[(comp_games['W'] == 1) & (comp_games['Pts_Num'] > 0)]
+    losses = hist[hist['L'] == 1]
+    wins = hist[(hist['W'] == 1) & (hist['Pts_Num'] > 0)]
     top15_loss = losses['Pts_Num'].nlargest(15).min() if not losses.empty else 999
     bot15_win = wins['Pts_Num'].nsmallest(15).max() if not wins.empty else 0
     
-    top15_margin = comp_games['Margin'].nlargest(15).min()
-    bot15_margin = comp_games[comp_games['Margin'] > 0]['Margin'].nsmallest(15).max()
+    top15_margin = hist['Margin'].nlargest(15).min()
+    bot15_margin = hist[hist['Margin'] > 0]['Margin'].nsmallest(15).max()
     
     records_flagged = False
     recap_lines.append("🏆 **Record Book Watch:**")
