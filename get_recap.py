@@ -67,7 +67,6 @@ def generate_recap(szn="2026", wk=None):
     # 3. Streaks
     recap_lines.append("🚂 **Current Streaks:**")
     streak_lines = []
-    # Deduplicate teams (curr has W and L rows)
     for tm in curr['Team_Name'].unique():
         tm_games = comp_games[(comp_games['Team_Name'] == tm) & (comp_games['Season_Str'] == szn)].sort_values('Week_Num', ascending=False)
         if not tm_games.empty:
@@ -105,11 +104,9 @@ def generate_recap(szn="2026", wk=None):
     try:
         szn_g = comp_games[(comp_games['Season_Str'] == szn) & (comp_games['Game_Type'] == 1)]
         
-        # Odds for Current Week
         recs_curr = szn_g[szn_g['Week_Num'] <= wk][['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')
         odds_curr, _ = odds_engine.run_playoff_odds_simulation_cached(szn, wk, recs_curr, n_wl_scenarios=5000)
         
-        # Odds for Previous Week
         recs_prev = szn_g[szn_g['Week_Num'] <= wk - 1][['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')
         odds_prev, _ = odds_engine.run_playoff_odds_simulation_cached(szn, wk - 1, recs_prev, n_wl_scenarios=5000)
         
@@ -122,9 +119,9 @@ def generate_recap(szn="2026", wk=None):
             pct_p = str(r['Playoff %_p'])
             
             if ">99.9" in pct_c and ">99.9" not in pct_p:
-                odds_updates.append(f"  🎉 **CLINCHED:** {tm} has officially locked up a playoff spot!")
+                odds_updates.append(f"  🎉 **VIRTUAL LOCK:** {tm} has statistically clinched a playoff spot (>99.9% in sims)!")
             elif "<0.1" in pct_c and "<0.1" not in pct_p:
-                odds_updates.append(f"  🪦 **ELIMINATED:** {tm} is mathematically out of the playoff hunt.")
+                odds_updates.append(f"  🪦 **FADE 'EM:** {tm} is statistically eliminated (<0.1% in sims).")
             else:
                 try:
                     val_c = float(pct_c.replace('%', '').replace('>', '').replace('<', ''))
@@ -145,9 +142,17 @@ def generate_recap(szn="2026", wk=None):
         recap_lines.append(f"  *(Could not calculate week-over-week odds: {e})*")
     recap_lines.append("")
 
-    # 6. All-Time & Franchise Records
+    # 6. Expanded Record Book Watch
     top15_alltime = comp_games['Pts_Num'].nlargest(15).min()
     bot15_alltime = comp_games[comp_games['Pts_Num'] > 0]['Pts_Num'].nsmallest(15).max()
+    
+    losses = comp_games[comp_games['L'] == 1]
+    wins = comp_games[(comp_games['W'] == 1) & (comp_games['Pts_Num'] > 0)]
+    top15_loss = losses['Pts_Num'].nlargest(15).min() if not losses.empty else 999
+    bot15_win = wins['Pts_Num'].nsmallest(15).max() if not wins.empty else 0
+    
+    top15_margin = comp_games['Margin'].nlargest(15).min()
+    bot15_margin = comp_games[comp_games['Margin'] > 0]['Margin'].nsmallest(15).max()
     
     records_flagged = False
     recap_lines.append("🏆 **Record Book Watch:**")
@@ -155,7 +160,10 @@ def generate_recap(szn="2026", wk=None):
     for _, g in curr.iterrows():
         tm = g['Team_Name']
         pts = g['Pts_Num']
+        is_win = g['W'] == 1
+        margin = float(g['Margin'])
         
+        # Baseline Highs/Lows
         if pts >= top15_alltime:
             recap_lines.append(f"  🔥 **Historic High:** {tm} dropped {pts:.1f} pts, entering the Top 15 highest scores in DFFL history.")
             records_flagged = True
@@ -163,6 +171,24 @@ def generate_recap(szn="2026", wk=None):
             recap_lines.append(f"  🧊 **Historic Low:** {tm} struggled with {pts:.1f} pts, entering the Bottom 15 scores in DFFL history.")
             records_flagged = True
             
+        # Win/Loss Quirks
+        if not is_win and pts >= top15_loss:
+            recap_lines.append(f"  😭 **Highest Scoring Loss:** {tm} lost despite scoring {pts:.1f} pts (a Top 15 Highest Scoring Loss all-time).")
+            records_flagged = True
+        if is_win and pts <= bot15_win:
+            recap_lines.append(f"  🍀 **Lowest Scoring Win:** {tm} won with just {pts:.1f} pts (a Top 15 Lowest Scoring Win all-time).")
+            records_flagged = True
+            
+        # Margin Extremes (only check winning rows to avoid duplicates)
+        if is_win:
+            if margin >= top15_margin:
+                recap_lines.append(f"  🚑 **Historic Blowout:** {tm} won by {margin:.1f} pts (a Top 15 biggest blowout in league history).")
+                records_flagged = True
+            elif 0 < margin <= bot15_margin:
+                recap_lines.append(f"  😬 **Historic Nail-Biter:** {tm} won by just {margin:.2f} pts (a Top 15 closest game in league history).")
+                records_flagged = True
+            
+        # Franchise Bests/Worsts
         tm_hist = hist[hist['Team_Name'] == tm]
         if not tm_hist.empty:
             tm_max = tm_hist['Pts_Num'].max()
@@ -200,7 +226,6 @@ def generate_recap(szn="2026", wk=None):
         recap_lines.append("🤬 **Bad Beats & Heartbreaks:**")
         recap_lines.extend(bad_beats)
     
-    # Output
     recap_text = "\n".join(recap_lines)
     print("\n" + recap_text + "\n")
     
