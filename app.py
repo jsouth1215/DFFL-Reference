@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import os
 
@@ -539,6 +539,18 @@ def load_data():
         pass
     games = games.dropna(subset=['Team_Name', 'Actual_Points'])
     games = games[~((games['Actual_Points'] == 0) & (games['Opp_Points'] == 0))]
+
+# --- LIVE WEEK WEB OVERRIDE ---
+import os
+import pandas as pd
+if os.path.exists('live_override.csv'):
+    try:
+        live_df = pd.read_csv('live_override.csv')
+        games = games[~((games['Season'].astype(str).str.contains('2026')) & (pd.to_numeric(games['Week'], errors='coerce') == 10))]
+        games = pd.concat([games, live_df], ignore_index=True)
+    except:
+        pass
+# ------------------------------
     games['Season'] = games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     games = games[games['Team_Name'].str.upper() != 'BYE']
 
@@ -2353,14 +2365,14 @@ elif active_tab == "Standings":
                 rem_g = odds_meta.get('rem_games', 0)
                 if rem_g > 0:
                     st.caption(
-                        f"**Simulation Engine:** `5,000` 50/50 W-L schedule permutations × `10` independent 3-regime scoring passes (`{odds_meta['total_runs']:,}` total runs) "
+                        f"**Simulation Engine:** `5,000` 50/50 W-L schedule permutations Ã— `10` independent 3-regime scoring passes (`{odds_meta['total_runs']:,}` total runs) "
                         f"across `{rem_g}` remaining regular-season games (`{rem_w}` weeks left). "
-                        f"Scoring regimes draw from Season Range (`{odds_meta['szn_min']:.1f}–{odds_meta['szn_max']:.1f}`), "
-                        f"League Avg ± 2σ (`{odds_meta['lg_mean']:.1f} ± {2*odds_meta['lg_sd']:.1f}`), and Team Avg ± 2σ. "
+                        f"Scoring regimes draw from Season Range (`{odds_meta['szn_min']:.1f}â€“{odds_meta['szn_max']:.1f}`), "
+                        f"League Avg Â± 2Ïƒ (`{odds_meta['lg_mean']:.1f} Â± {2*odds_meta['lg_sd']:.1f}`), and Team Avg Â± 2Ïƒ. "
                         f"`*` = Mathematically Clinched / Eliminated; `>99.9%` (`-25000`) / `<0.1%` (`+25000`) = 100% or 0% in sims but still mathematically live."
                     )
                 else:
-                    st.caption("Regular season complete — all playoff seeds and outcomes are locked.")
+                    st.caption("Regular season complete â€” all playoff seeds and outcomes are locked.")
 
                 disp_odds_cols = [
                     'Rank', 'Team', 'Current Record', 'Current PF', 'Avg Seed',
@@ -2473,7 +2485,7 @@ elif active_tab == "Records":
 
     if rec_type == "All-Time Records":
         st.write("### All-Time Records")
-        st.write("Regular season win-loss records by season. Green indicates a playoff berth, and bold with a trophy (🏆) indicates the league champion.")
+        st.write("Regular season win-loss records by season. Green indicates a playoff berth, and bold with a trophy (ðŸ†) indicates the league champion.")
 
         all_szns = sorted([str(s).replace('.0', '').strip() for s in games['Season'].dropna().unique() if str(s).replace('.0', '').strip().isdigit()], key=lambda x: int(x))
 
@@ -2559,7 +2571,7 @@ elif active_tab == "Records":
                     txt = '<span style="font-style: italic; color: #444;">n/a</span>'
                 elif cell['is_champ']:
                     bg = "#d9ead3"
-                    txt = f'🏆 <b>{cell["text"]}</b>'
+                    txt = f'ðŸ† <b>{cell["text"]}</b>'
                 elif cell['is_po']:
                     bg = "#d9ead3"
                     txt = cell['text']
@@ -3266,4 +3278,7 @@ elif active_tab == "Deadball Era":
     import importlib
     importlib.reload(deadball_tab)
     deadball_tab.render()
+
+
+
 
