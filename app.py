@@ -1987,7 +1987,8 @@ active_tab = st.radio("Navigation", NAV_TABS, horizontal=True, label_visibility=
 
 # ================= TAB 0: HOME =================
 if active_tab == "Home":
-    import odds_engine
+    import importlib, odds_engine
+    importlib.reload(odds_engine)
 
     cur_szn = seasons_list[0] if seasons_list else "2026"
     szn_clean = str(cur_szn).replace('.0', '').strip()
@@ -2067,6 +2068,8 @@ if active_tab == "Home":
 
         col_lw, col_nw = st.columns([1.05, 1.35])
 
+        rec_lookup = dict(zip(stnd_h['Team_Name'], stnd_h.apply(lambda r: f"{int(r['W'])}-{int(r['L'])}" + (f"-{int(r['T'])}" if r['T'] > 0 else ""), axis=1)))
+
         with col_lw:
             st.markdown(f"### Week {max_wk} Scoreboard")
             lw_games = szn_reg[szn_reg['Week_Num'] == max_wk].copy()
@@ -2085,9 +2088,9 @@ if active_tab == "Home":
                     t1, t2 = t2, t1
                     p1, p2 = p2, p1
                 lw_rows.append({
-                    'Winner': t1,
+                    'Winner': f"{t1} ({rec_lookup.get(t1, '')})",
                     'Win Pts': make_box_link(f"{p1:.1f}", szn_clean, max_wk, t1),
-                    'Loser': t2,
+                    'Loser': f"{t2} ({rec_lookup.get(t2, '')})",
                     'Loss Pts': make_box_link(f"{p2:.1f}", szn_clean, max_wk, t2),
                     'Margin': f"{abs(p1 - p2):.1f}"
                 })
@@ -2810,7 +2813,8 @@ elif active_tab == "Standings":
                 render_html_table(stnd[cols_disp].rename(columns={'Team_Name': 'Team'}), highlight_fn=hl_stnd)
 
         if stnd_tab_mode in ["Standings & Playoff Odds", "Playoff Odds & Moneylines Only"]:
-            import odds_engine
+            import importlib, odds_engine
+    importlib.reload(odds_engine)
 
             st.markdown(f"### Monte Carlo Playoff Odds & Moneyline Board (Through Week {sel_wk})")
             szn_records = szn_data[['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')

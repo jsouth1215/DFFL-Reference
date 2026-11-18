@@ -237,7 +237,8 @@ def run_playoff_odds_simulation(
     div_groups=None,
     n_wl_scenarios=5000,
     n_score_passes=10,
-    seed=42
+    seed=42,
+    _engine_ver="v3"
 ):
     df_all = pd.DataFrame(szn_games_records)
     if df_all.empty:
