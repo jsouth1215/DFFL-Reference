@@ -8,27 +8,20 @@ import hashlib as _hashlib
 _ORIG_READ_EXCEL = pd.read_excel
 
 def _cached_read_excel(io, *args, **kwargs):
-    if isinstance(io, str) and os.path.exists(io) and not kwargs.get("nrows"):
-        try:
-            cache_dir = os.path.join(os.path.dirname(os.path.abspath(io)), "_fast_cache_v3")
-            os.makedirs(cache_dir, exist_ok=True)
-            mtime = os.path.getmtime(io)
-            sh_name = kwargs.get("sheet_name", args[0] if args else 0)
+    if isinstance(io, str) and not kwargs.get("nrows"):
+        sh_name = kwargs.get("sheet_name", args[0] if args else 0)
+        safe_name = str(sh_name).replace(" ", "_")
+        fast_file = f"cloud_cache_{safe_name}.pkl"
+        if os.path.exists(fast_file):
+            df_res = pd.read_pickle(fast_file)
+            # Mimic pandas header=1 behavior on the pre-cached dataframe
             hdr = kwargs.get("header", 0)
-            uc = kwargs.get("usecols", None)
-            sr = kwargs.get("skiprows", None)
-            sheet_key = f"{sh_name}|h={hdr}|u={uc}|s={sr}"
-            key_hash = _hashlib.md5(f"{os.path.abspath(io)}|{mtime}|{sheet_key}".encode()).hexdigest()[:16]
-            pkl_path = os.path.join(cache_dir, f"{os.path.basename(io)}_{key_hash}.pkl")
-            if os.path.exists(pkl_path):
-                return pd.read_pickle(pkl_path)
-            df_res = _ORIG_READ_EXCEL(io, *args, **kwargs)
-            if isinstance(df_res, pd.DataFrame):
-                df_res.to_pickle(pkl_path)
+            if hdr == 1:
+                df_res.columns = df_res.iloc[0]
+                df_res = df_res[1:].reset_index(drop=True)
             return df_res
-        except Exception:
-            return _ORIG_READ_EXCEL(io, *args, **kwargs)
     return _ORIG_READ_EXCEL(io, *args, **kwargs)
+
 pd.read_excel = _cached_read_excel
 
 import draft_tab
