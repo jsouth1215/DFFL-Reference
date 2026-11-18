@@ -3993,12 +3993,14 @@ elif active_tab == "Playoffs":
 
         st.markdown(f'<div class="dffl-brk-grid">{"".join(cols_html)}</div>', unsafe_allow_html=True)
 
-        # Optional Consolation / 3rd Place games below
-        cons_list = _dedup_round_games(cons_games)
-        if cons_list:
-            st.markdown("#### Consolation & Placement Games")
-            c_cards = [_render_card_html(mc, "Consolation / Placement") for mc in cons_list]
-            st.markdown(f'<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(265px, 1fr)); gap: 16px; margin-top: 10px;">{"".join(c_cards)}</div>', unsafe_allow_html=True)
+        # Only show Last Place Game for 2026+ (no historical consolation/placement games)
+        if szn_clean.isdigit() and int(szn_clean) >= 2026 and not cons_games.empty:
+            cons_list = _dedup_round_games(cons_games)
+            lpg_played = [mc for mc in cons_list if {mc['s1'], mc['s2']} == {11, 12}]
+            if lpg_played:
+                st.markdown("#### Last Place Bowl (#11 vs. #12)")
+                c_cards = [_render_card_html(mc, "Last Place Game") for mc in lpg_played]
+                st.markdown(f'<div style="max-width: 340px; margin-top: 10px;">{"".join(c_cards)}</div>', unsafe_allow_html=True)
 
     else:
         # Active season (e.g. 2026) where playoffs haven't started yet -> Projected Playoff Bracket
