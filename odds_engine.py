@@ -238,7 +238,7 @@ def run_playoff_odds_simulation(
     n_wl_scenarios=5000,
     n_score_passes=10,
     seed=42,
-    _engine_ver="v3"
+    _engine_ver="v4"
 ):
     df_all = pd.DataFrame(szn_games_records)
     if df_all.empty:
@@ -459,8 +459,8 @@ def run_playoff_odds_simulation(
             "Avg Seed": f"{avg_rk:.1f}",
             "Playoff %": fmt_prob(p_po, clinched_playoffs[i], elim_playoffs[i]),
             "Playoff ML": prob_to_moneyline(p_po, clinched_playoffs[i], elim_playoffs[i]),
-            "First-Round Bye %": fmt_prob(p_bye, clinched_bye[i], elim_bye[i]),
-            "Bye ML": prob_to_moneyline(p_bye, clinched_bye[i], elim_bye[i]),
+            "First-Round Bye %": fmt_prob(p_bye, clinched_bye[i], elim_bye[i], blank_if_elim=True),
+            "Bye ML": prob_to_moneyline(p_bye, clinched_bye[i], elim_bye[i], blank_if_elim=True),
             "Last Place Game %": fmt_prob(p_lpg, clinched_lpg[i], is_safe_lpg, blank_if_elim=True),
             "Last Place Game ML": prob_to_moneyline(p_lpg, clinched_lpg[i], is_safe_lpg, blank_if_elim=True),
             "_sort_po": 1.0 if clinched_playoffs[i] else (0.0 if elim_playoffs[i] else p_po),

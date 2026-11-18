@@ -32,7 +32,7 @@ import deadball_tab
 st.set_page_config(page_title="DFFL Reference", layout="wide")
 
 # ================= UI & FORMATTING HELPERS =================
-def render_html_table(df, highlight_fn=None, left_align_cols=None):
+def render_html_table(df, highlight_fn=None, left_align_cols=None, max_width=None):
     if df is None or df.empty:
         return
     df = df.loc[:, ~df.columns.duplicated()].reset_index(drop=True).copy()
@@ -76,9 +76,10 @@ def render_html_table(df, highlight_fn=None, left_align_cols=None):
         ]}
     ]).to_html()
 
+    mw_style = f"max-width: {max_width}; " if max_width else "width: 100%; "
     wrapper_html = (
         "<style>"
-        ".dffl-tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; "
+        ".dffl-tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; "
         "margin: 6px 0 18px 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }"
         ".dffl-tbl-wrap table { width: 100%; border-collapse: collapse; }"
         "@media (max-width: 768px) {"
@@ -88,7 +89,7 @@ def render_html_table(df, highlight_fn=None, left_align_cols=None):
         "  }"
         "}"
         "</style>"
-        f'<div class="dffl-tbl-wrap">{styled_html}</div>'
+        f'<div class="dffl-tbl-wrap" style="{mw_style}">{styled_html}</div>'
     )
     st.markdown(wrapper_html, unsafe_allow_html=True)
 
@@ -2037,7 +2038,7 @@ if active_tab == "Home":
                 bye_raw = str(orow.get('Bye ML', '')).strip()
                 lpg_raw = str(orow.get('Last Place Game ML', '')).strip()
                 po_ml_map[tm_k] = "Clinched" if po_raw == "CLINCHED" else ("Eliminated" if po_raw == "ELIM" else po_raw)
-                bye_ml_map[tm_k] = "Clinched" if bye_raw == "CLINCHED" else ("Eliminated" if bye_raw == "ELIM" else bye_raw)
+                bye_ml_map[tm_k] = "Clinched" if bye_raw == "CLINCHED" else ("" if bye_raw in ("ELIM", "") else bye_raw)
                 lpg_ml_map[tm_k] = "Clinched" if lpg_raw == "CLINCHED" else ("" if lpg_raw in ("ELIM", "") else lpg_raw)
 
         stnd_h['PF_Fmt'] = stnd_h['PF'].apply(lambda x: f"{float(x):.1f}")
@@ -2064,7 +2065,7 @@ if active_tab == "Home":
             return styles
 
         st.markdown(f"### {szn_clean} Standings & Moneylines (Through Week {max_wk})")
-        render_html_table(home_stnd_disp, highlight_fn=_hl_home_stnd)
+        render_html_table(home_stnd_disp, highlight_fn=_hl_home_stnd, max_width="780px")
 
         col_lw, col_nw = st.columns([1.05, 1.35])
 
