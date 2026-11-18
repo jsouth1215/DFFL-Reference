@@ -2814,7 +2814,7 @@ elif active_tab == "Standings":
 
         if stnd_tab_mode in ["Standings & Playoff Odds", "Playoff Odds & Moneylines Only"]:
             import importlib, odds_engine
-    importlib.reload(odds_engine)
+            importlib.reload(odds_engine)
 
             st.markdown(f"### Monte Carlo Playoff Odds & Moneyline Board (Through Week {sel_wk})")
             szn_records = szn_data[['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')
