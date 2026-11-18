@@ -1198,6 +1198,205 @@ def get_div_and_overall_finish_map(games_df, rs_ranks_df):
     return out_map
 
 
+@st.cache_data(show_spinner=False)
+def get_kicker_margin_and_onesie_records(_box_df, _games, _rows_len=0):
+    if _box_df.empty or _games.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    b = _box_df.copy()
+    slot_c = 'Slot' if 'Slot' in b.columns else ('Lineup_Slot' if 'Lineup_Slot' in b.columns else 'Position')
+    name_c = 'Player_Name' if 'Player_Name' in b.columns else 'Player'
+    pts_c = 'Actual_Points' if 'Actual_Points' in b.columns else 'Points'
+    pos_c = 'Position' if 'Position' in b.columns else ('Pos' if 'Pos' in b.columns else slot_c)
+
+    b['Season_Str'] = b['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    b['Week_Num'] = pd.to_numeric(b['Week'], errors='coerce').fillna(0).astype(int)
+    b['Team_Str'] = b['Team_Name'].astype(str).str.strip()
+    b['Pts_Num'] = pd.to_numeric(b[pts_c], errors='coerce').fillna(0.0)
+    b['Slot_Up'] = b[slot_c].astype(str).str.strip().str.upper()
+
+    def _clean_true_pos(r):
+        p = str(r[pos_c]).strip().upper()
+        s = str(r['Slot_Up']).strip().upper()
+        if p in ['K', 'PK'] or s in ['K', 'PK']:
+            return 'K'
+        if p in ['D/ST', 'DST', 'DEF', 'DP'] or s in ['D/ST', 'DST', 'DEF']:
+            return 'D/ST'
+        if p in ['QB', 'RB', 'WR', 'TE']:
+            return p
+        if s in ['QB', 'RB', 'WR', 'TE']:
+            return s
+        return p
+
+    b['True_Pos'] = b.apply(_clean_true_pos, axis=1)
+    is_bench = b['Slot_Up'].isin(['BE', 'IR', 'BENCH', 'RES'])
+    starters = b[~is_bench].copy()
+    bench = b[is_bench].copy()
+
+    # Build lookup of starters by (Season_Str, Week_Num, Team_Str)
+    start_grp = {k: grp for k, grp in starters.groupby(['Season_Str', 'Week_Num', 'Team_Str'])}
+    bench_grp = {k: grp for k, grp in bench.groupby(['Season_Str', 'Week_Num', 'Team_Str'])}
+
+    # Unique competitive games (Game_Type 1 & 2, W == 1 to inspect each matchup once)
+    comp_wins = _games[_games['Game_Type'].isin([1, 2]) & (_games['W'] == 1) & (_games['Team_Name'].str.upper() != 'CAM') & (_games['Opponent_Team_Name'].str.upper() != 'CAM')].copy()
+    comp_wins['Season_Str'] = comp_wins['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    comp_wins['Week_Num'] = pd.to_numeric(comp_wins['Week'], errors='coerce').fillna(0).astype(int)
+
+    neg_heartbreaks = []
+    bench_regrets = []
+    kicker_flips = []
+    onesie_diffs = []
+
+    for _, m in comp_wins.iterrows():
+        s = m['Season_Str']
+        w = int(m['Week_Num'])
+        win_tm = str(m['Team_Name']).strip()
+        los_tm = str(m['Opponent_Team_Name']).strip()
+        win_pts = float(m['Actual_Points'])
+        los_pts = float(m['Opp_Points'])
+        margin = round(win_pts - los_pts, 2)
+        if margin <= 0:
+            continue
+
+        w_st = start_grp.get((s, w, win_tm), pd.DataFrame())
+        l_st = start_grp.get((s, w, los_tm), pd.DataFrame())
+        l_be = bench_grp.get((s, w, los_tm), pd.DataFrame())
+
+        # 1. Negative Starter Heartbreaks (on losing team)
+        if not l_st.empty:
+            neg_pl = l_st[l_st['Pts_Num'] < 0.0].sort_values('Pts_Num', ascending=True)
+            if not neg_pl.empty:
+                worst_r = neg_pl.iloc[0]
+                neg_val = float(worst_r['Pts_Num'])
+                tot_neg = float(neg_pl['Pts_Num'].sum())
+                # Check if benching the single worst negative starter (or all negative starters) flips/ties
+                if abs(neg_val) >= margin:
+                    new_los_pts = los_pts - neg_val
+                    neg_heartbreaks.append({
+                        'Season': s,
+                        'Week': w,
+                        'Loser': los_tm,
+                        'Winner': win_tm,
+                        'Actual Score': f"{los_pts:.1f} - {win_pts:.1f}",
+                        'Loss Margin': f"{margin:.2f}",
+                        'Margin_Num': margin,
+                        'Negative Starter': f"{worst_r[name_c]} ({ worst_r['True_Pos'] })",
+                        'Starter_Pts_Num': neg_val,
+                        'Starter Pts': f"{neg_val:.1f}",
+                        'Score w/ Empty Slot (0.0)': f"{new_los_pts:.1f} - {win_pts:.1f}"
+                    })
+
+        # 2. Managerial Regret (Bench Heartbreaks on losing team)
+        if not l_st.empty and not l_be.empty:
+            best_gain = 0.0
+            best_swap_info = None
+            for _, br in l_be.iterrows():
+                b_pos = str(br['True_Pos'])
+                b_pts = float(br['Pts_Num'])
+                if b_pts <= 0:
+                    continue
+                # Eligible starter slots this bench player could legally replace
+                if b_pos == 'QB':
+                    elig_st = l_st[l_st['True_Pos'] == 'QB']
+                elif b_pos in ('RB', 'WR', 'TE'):
+                    elig_st = l_st[(l_st['True_Pos'] == b_pos) | (l_st['Slot_Up'].isin(['RB/WR/TE', 'FLEX']))]
+                elif b_pos == 'D/ST':
+                    elig_st = l_st[l_st['True_Pos'] == 'D/ST']
+                elif b_pos == 'K':
+                    elig_st = l_st[l_st['True_Pos'] == 'K']
+                else:
+                    elig_st = pd.DataFrame()
+
+                if not elig_st.empty:
+                    worst_st = elig_st.sort_values('Pts_Num', ascending=True).iloc[0]
+                    st_pts = float(worst_st['Pts_Num'])
+                    gain = round(b_pts - st_pts, 2)
+                    if gain > margin and gain > best_gain:
+                        best_gain = gain
+                        best_swap_info = (worst_st, br, gain)
+
+            if best_swap_info is not None:
+                st_r, be_r, gain_v = best_swap_info
+                bench_regrets.append({
+                    'Season': s,
+                    'Week': w,
+                    'Loser': los_tm,
+                    'Winner': win_tm,
+                    'Actual Score': f"{los_pts:.1f} - {win_pts:.1f}",
+                    'Loss Margin': f"{margin:.1f}",
+                    'Margin_Num': margin,
+                    'Started': f"{st_r[name_c]} ({st_r['Slot_Up']}, {float(st_r['Pts_Num']):.1f})",
+                    'On Bench': f"{be_r[name_c]} ({be_r['True_Pos']}, {float(be_r['Pts_Num']):.1f})",
+                    'Points Left on Bench': f"+{gain_v:.1f}",
+                    'Gain_Num': gain_v,
+                    'Hypothetical Score': f"{los_pts + gain_v:.1f} - {win_pts:.1f}"
+                })
+
+        # 3. Kicker Margin Games & 4. Onesie Positional Discrepancies (QB, D/ST, K)
+        if not w_st.empty and not l_st.empty:
+            w_k_df = w_st[w_st['True_Pos'] == 'K']
+            l_k_df = l_st[l_st['True_Pos'] == 'K']
+            w_k_pts = float(w_k_df['Pts_Num'].sum()) if not w_k_df.empty else 0.0
+            l_k_pts = float(l_k_df['Pts_Num'].sum()) if not l_k_df.empty else 0.0
+            w_no_k = round(win_pts - w_k_pts, 2)
+            l_no_k = round(los_pts - l_k_pts, 2)
+            if l_no_k > w_no_k:
+                w_k_name = f"{w_k_df.iloc[0][name_c]} ({w_k_pts:.1f})" if not w_k_df.empty else f"None (0.0)"
+                l_k_name = f"{l_k_df.iloc[0][name_c]} ({l_k_pts:.1f})" if not l_k_df.empty else f"None (0.0)"
+                k_diff = round(w_k_pts - l_k_pts, 2)
+                kicker_flips.append({
+                    'Season': s,
+                    'Week': w,
+                    'Actual Winner': win_tm,
+                    'Actual Loser': los_tm,
+                    'Actual Score': f"{win_pts:.1f} - {los_pts:.1f}",
+                    'Actual Margin': f"{margin:.1f}",
+                    'Winner Kicker': w_k_name,
+                    'Loser Kicker': l_k_name,
+                    'Kicker Diff': f"+{k_diff:.1f}",
+                    'K_Diff_Num': k_diff,
+                    'No-Kicker Score': f"{l_no_k:.1f} - {w_no_k:.1f} ({los_tm} +{l_no_k - w_no_k:.1f})"
+                })
+
+            for onesie_pos in ['QB', 'D/ST', 'K']:
+                w_p = w_st[w_st['True_Pos'] == onesie_pos]
+                l_p = l_st[l_st['True_Pos'] == onesie_pos]
+                if w_p.empty and l_p.empty:
+                    continue
+                wp_pts = float(w_p['Pts_Num'].sum()) if not w_p.empty else 0.0
+                lp_pts = float(l_p['Pts_Num'].sum()) if not l_p.empty else 0.0
+                wp_nm = ", ".join([f"{r[name_c]} ({float(r['Pts_Num']):.1f})" for _, r in w_p.iterrows()]) or "Empty (0.0)"
+                lp_nm = ", ".join([f"{r[name_c]} ({float(r['Pts_Num']):.1f})" for _, r in l_p.iterrows()]) or "Empty (0.0)"
+                diff_v = round(abs(wp_pts - lp_pts), 2)
+                if diff_v == 0:
+                    continue
+                if wp_pts >= lp_pts:
+                    hi_tm, hi_pl, hi_val = win_tm, wp_nm, wp_pts
+                    lo_tm, lo_pl, lo_val = los_tm, lp_nm, lp_pts
+                    hi_won = "Won Matchup"
+                else:
+                    hi_tm, hi_pl, hi_val = los_tm, lp_nm, lp_pts
+                    lo_tm, lo_pl, lo_val = win_tm, wp_nm, wp_pts
+                    hi_won = "Lost Matchup"
+                onesie_diffs.append({
+                    'Pos': onesie_pos,
+                    'Diff_Num': diff_v,
+                    'Positional Margin': f"+{diff_v:.1f}",
+                    'Season': s,
+                    'Week': w,
+                    'Advantage Team': hi_tm,
+                    'Advantage Player': hi_pl,
+                    'Disadvantage Team': lo_tm,
+                    'Disadvantage Player': lo_pl,
+                    'Matchup Outcome': f"{hi_won} ({win_tm} {win_pts:.1f} - {los_tm} {los_pts:.1f})"
+                })
+
+    df_neg = pd.DataFrame(neg_heartbreaks).sort_values(['Margin_Num', 'Starter_Pts_Num'], ascending=[True, True]).reset_index(drop=True) if neg_heartbreaks else pd.DataFrame()
+    df_reg = pd.DataFrame(bench_regrets).sort_values(['Margin_Num', 'Gain_Num'], ascending=[True, False]).reset_index(drop=True) if bench_regrets else pd.DataFrame()
+    df_kfl = pd.DataFrame(kicker_flips).sort_values(['K_Diff_Num', 'Season', 'Week'], ascending=[False, False, False]).reset_index(drop=True) if kicker_flips else pd.DataFrame()
+    df_one = pd.DataFrame(onesie_diffs).sort_values(['Diff_Num', 'Season', 'Week'], ascending=[False, False, False]).reset_index(drop=True) if onesie_diffs else pd.DataFrame()
+    return df_neg, df_reg, df_kfl, df_one
+
 def render_franchise_starter_breakdown(d_team, box_df, games, seasons_list):
     if box_df.empty:
         st.warning("Player data not found.")
@@ -1273,6 +1472,34 @@ def render_franchise_starter_breakdown(d_team, box_df, games, seasons_list):
             'D/ST': ['Sacks', 'INT', 'FR', 'TD']
         }.get(p_target, [])
         return df[[c for c in base + stats_cols + ['Points', 'PPG', col_dyn] if c in df.columns]]
+
+    # Consolidated Positional Summary (strictly by true player position, ignoring Flex slot labels)
+    st.write(f"### Consolidated Positional Scoring Summary ({d_year})")
+    st.caption("Grouped strictly by each player's true position (`QB`, `RB`, `WR`, `TE`, `D/ST`, `K`) regardless of whether they were started in a standard or Flex (`RB/WR/TE`) slot.")
+    pos_order_all = ['QB', 'RB', 'WR', 'TE', 'D/ST', 'K']
+    tot_team_pts = float(counted[pts_c].sum()) if not counted.empty else 0.0
+    cons_rows = []
+    for p_code in pos_order_all:
+        sub_p = counted[counted['Clean_Pos'] == p_code]
+        if sub_p.empty:
+            continue
+        p_starts = len(sub_p)
+        p_pts = float(sub_p[pts_c].sum())
+        p_uniq = sub_p[name_c].nunique()
+        p_lead = sub_p.groupby(name_c)[pts_c].sum().sort_values(ascending=False)
+        top_p_str = f"{p_lead.index[0]} ({p_lead.iloc[0]:,.1f})" if not p_lead.empty else "-"
+        cons_rows.append({
+            'Position': p_code,
+            'Starts': p_starts,
+            'Unique Starters': p_uniq,
+            'Total Points': f"{p_pts:,.1f}",
+            'Pts / Start': f"{p_pts / p_starts:.1f}" if p_starts > 0 else "0.0",
+            '% of Team Scoring': f"{(p_pts / tot_team_pts * 100.0):.1f}%" if tot_team_pts > 0 else "0.0%",
+            'Top Contributor': top_p_str
+        })
+    if cons_rows:
+        render_html_table(pd.DataFrame(cons_rows), left_align_cols=['Top Contributor'])
+    st.divider()
 
     pos_list = ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST'] if d_pos == "All Positions" else [d_pos]
     titles = {'QB': 'Quarterbacks (QB)', 'RB': 'Running Backs (RB)', 'WR': 'Wide Receivers (WR)', 'TE': 'Tight Ends (TE)', 'K': 'Kickers (K)', 'D/ST': 'Defense / Special Teams (D/ST)'}
@@ -2641,7 +2868,12 @@ elif active_tab == "Records":
             "Lowest Scoring Weekly Bags",
             "Largest Monday Night Comebacks",
             "Biggest Blowouts",
-            "Closest Games"
+            "Closest Games",
+            "Negative Starter Heartbreaks",
+            "Managerial Regret (Bench Heartbreaks)",
+            "Kicker Margin Games",
+            "Biggest Positional Discrepancies (QB, D/ST, K)",
+            "League-Wide Weekly Scoring Records"
         ],
         "Season Records": [
             "Most Points Per Game in a Season",
@@ -2668,6 +2900,7 @@ elif active_tab == "Records":
             "Roster & Starter Milestones"
         ],
         "Other": [
+            "Positional Scoring by Team (Season / All-Time)",
             "Weekly Scoring Rank Heatmap",
             "NFL Franchise Usage Matrix (12 Teams x 32 NFL Teams)"
         ]
@@ -3292,6 +3525,232 @@ elif active_tab == "Records":
             render_html_table(table_disp, left_align_cols=['NFL Team'], highlight_fn=hl_tot)
         else:
             st.info("No starter data found for the selected season.")
+
+    elif rec_type == "Negative Starter Heartbreaks":
+        st.write("### Negative Starter Heartbreaks")
+        st.write("Games where a team started a player who scored negative points (`< 0.0`) and lost by **less** than those negative points (leaving the lineup slot empty for `0.0` would have won or tied the game).")
+        df_neg, _, _, _ = get_kicker_margin_and_onesie_records(box_df, games, len(box_df))
+        if not df_neg.empty:
+            df_neg = apply_competition_rank(df_neg, 'Margin_Num', round_digits=2)
+            df_neg['Actual Score'] = df_neg.apply(lambda r: make_box_link(r['Actual Score'], r['Season'], r['Week'], r['Loser']), axis=1)
+            cols = ['Rank', 'Season', 'Week', 'Loser', 'Winner', 'Actual Score', 'Loss Margin', 'Negative Starter', 'Starter Pts', 'Score w/ Empty Slot (0.0)']
+            render_html_table(df_neg[cols])
+        else:
+            st.info("No losses found where benching a negative starter for 0.0 would have flipped the outcome.")
+
+    elif rec_type == "Managerial Regret (Bench Heartbreaks)":
+        st.write("### Managerial Regret (Bench Heartbreaks)")
+        st.write("Losses that would have been **Wins** with a single legal 1-for-1 starter-for-bench swap on that manager's roster.")
+        _, df_reg, _, _ = get_kicker_margin_and_onesie_records(box_df, games, len(box_df))
+        if not df_reg.empty:
+            reg_sort = st.radio("Sort By:", ["Smallest Loss Margin (Closest Heartbreaks)", "Most Points Left on Bench (Biggest Swap Swing)"], horizontal=True, key="regret_sort_mode")
+            if reg_sort.startswith("Most"):
+                df_reg = df_reg.sort_values(['Gain_Num', 'Margin_Num'], ascending=[False, True]).head(30).reset_index(drop=True)
+                df_reg = apply_competition_rank(df_reg, 'Gain_Num', round_digits=1)
+            else:
+                df_reg = df_reg.sort_values(['Margin_Num', 'Gain_Num'], ascending=[True, False]).head(30).reset_index(drop=True)
+                df_reg = apply_competition_rank(df_reg, 'Margin_Num', round_digits=1)
+            df_reg['Actual Score'] = df_reg.apply(lambda r: make_box_link(r['Actual Score'], r['Season'], r['Week'], r['Loser']), axis=1)
+            cols = ['Rank', 'Season', 'Week', 'Loser', 'Winner', 'Actual Score', 'Loss Margin', 'Started', 'On Bench', 'Points Left on Bench', 'Hypothetical Score']
+            render_html_table(df_reg[cols], left_align_cols=['Started', 'On Bench'])
+        else:
+            st.info("No bench heartbreak games found.")
+
+    elif rec_type == "Kicker Margin Games":
+        st.write("### Kicker Margin Games")
+        st.write("Games where the final win/loss outcome would have **flipped** if Kickers were removed for both teams.")
+        _, _, df_kfl, _ = get_kicker_margin_and_onesie_records(box_df, games, len(box_df))
+        if not df_kfl.empty:
+            st.markdown(f"**Total Games Flipped by Kickers (2017–2026):** **`{len(df_kfl)}`**")
+            # Also show manager net Kicker Luck summary
+            w_cnts = df_kfl['Actual Winner'].value_counts().to_dict()
+            l_cnts = df_kfl['Actual Loser'].value_counts().to_dict()
+            all_k_tms = sorted(list(set(list(w_cnts.keys()) + list(l_cnts.keys()))))
+            k_sum = []
+            for tm in all_k_tms:
+                kw = w_cnts.get(tm, 0)
+                kl = l_cnts.get(tm, 0)
+                k_sum.append({'Team': tm, 'Won Because of Kicker': kw, 'Lost Because of Kicker': kl, 'Net_Num': kw - kl, 'Net Kicker Wins': f"{kw - kl:+d}" if (kw - kl) != 0 else "0"})
+            k_sum_df = pd.DataFrame(k_sum).sort_values(['Net_Num', 'Won Because of Kicker'], ascending=[False, False]).reset_index(drop=True)
+            with st.expander("View Net Kicker Margin Standings by Manager", expanded=False):
+                render_html_table(k_sum_df[['Team', 'Won Because of Kicker', 'Lost Because of Kicker', 'Net Kicker Wins']])
+
+            df_kfl = apply_competition_rank(df_kfl, 'K_Diff_Num', round_digits=1)
+            df_kfl['Actual Score'] = df_kfl.apply(lambda r: make_box_link(r['Actual Score'], r['Season'], r['Week'], r['Actual Winner']), axis=1)
+            cols = ['Rank', 'Season', 'Week', 'Actual Winner', 'Actual Loser', 'Actual Score', 'Actual Margin', 'Winner Kicker', 'Loser Kicker', 'Kicker Diff', 'No-Kicker Score']
+            render_html_table(df_kfl[cols])
+        else:
+            st.info("No kicker margin games found.")
+
+    elif rec_type == "Biggest Positional Discrepancies (QB, D/ST, K)":
+        st.write("### Biggest Positional Matchup Discrepancies (QB, D/ST, K)")
+        st.write("Largest single-game head-to-head point differentials at the 'Onesie' positions (`QB`, `D/ST`, and `K`). Skill positions (`RB`/`WR`/`TE`) are excluded due to Flex slot variance.")
+        _, _, _, df_one = get_kicker_margin_and_onesie_records(box_df, games, len(box_df))
+        if not df_one.empty:
+            pos_flt = st.radio("Position Filter:", ["All Onesie Positions (QB, D/ST, K)", "QB Only", "D/ST Only", "K Only"], horizontal=True, key="onesie_pos_flt")
+            if pos_flt == "QB Only":
+                sub_one = df_one[df_one['Pos'] == 'QB'].copy()
+            elif pos_flt == "D/ST Only":
+                sub_one = df_one[df_one['Pos'] == 'D/ST'].copy()
+            elif pos_flt == "K Only":
+                sub_one = df_one[df_one['Pos'] == 'K'].copy()
+            else:
+                sub_one = df_one.copy()
+            sub_one = sub_one.sort_values(['Diff_Num', 'Season', 'Week'], ascending=[False, False, False]).head(25).reset_index(drop=True)
+            sub_one = apply_competition_rank(sub_one, 'Diff_Num', round_digits=1)
+            sub_one['Positional Margin'] = sub_one.apply(lambda r: make_box_link(r['Positional Margin'], r['Season'], r['Week'], r['Advantage Team']), axis=1)
+            cols = ['Rank', 'Pos', 'Positional Margin', 'Season', 'Week', 'Advantage Team', 'Advantage Player', 'Disadvantage Team', 'Disadvantage Player', 'Matchup Outcome']
+            render_html_table(sub_one[cols], left_align_cols=['Matchup Outcome'])
+
+    elif rec_type == "League-Wide Weekly Scoring Records":
+        st.write("### League-Wide Weekly Scoring Records")
+        lw_mode = st.radio(
+            "Select League Metric:",
+            [
+                "Highest Scoring League Weeks (Combined Points)",
+                "Lowest Scoring League Weeks (Combined Points)",
+                "Tightest Bag Battles (#1 vs. #2 Scorer)",
+                "Largest 1-to-12 Weekly Spreads (#1 vs. #12)",
+                "Tightest 1-to-12 Weekly Spreads (#1 vs. #12)"
+            ],
+            horizontal=True,
+            key="lw_scoring_rec_mode"
+        )
+        reg_lw = games[(games['Game_Type'] == 1) & (games['Actual_Points'] > 0)].copy()
+        reg_lw['Season_Str'] = reg_lw['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        wk_rows = []
+        for (s_str, w_num), grp in reg_lw.groupby(['Season_Str', 'Week_Num']):
+            n_tm = len(grp)
+            if n_tm < 10:
+                continue
+            ordered = grp.sort_values('Actual_Points', ascending=False).reset_index(drop=True)
+            tot_pts = float(ordered['Actual_Points'].sum())
+            avg_pts = tot_pts / n_tm
+            p1_tm, p1_pts = str(ordered.iloc[0]['Team_Name']), float(ordered.iloc[0]['Actual_Points'])
+            p2_tm, p2_pts = str(ordered.iloc[1]['Team_Name']), float(ordered.iloc[1]['Actual_Points'])
+            plast_tm, plast_pts = str(ordered.iloc[-1]['Team_Name']), float(ordered.iloc[-1]['Actual_Points'])
+            bag_margin = round(p1_pts - p2_pts, 2)
+            spread_1_12 = round(p1_pts - plast_pts, 2)
+            wk_rows.append({
+                'Season': s_str,
+                'Season_Int': int(s_str) if s_str.isdigit() else 0,
+                'Week': int(w_num),
+                'Teams': n_tm,
+                'Tot_Num': tot_pts,
+                'Combined League Pts': f"{tot_pts:,.1f}",
+                'League Avg': f"{avg_pts:.1f}",
+                '#1 Scorer (Bag)': make_box_link(f"{p1_tm} ({p1_pts:.1f})", s_str, w_num, p1_tm),
+                '#2 Scorer': make_box_link(f"{p2_tm} ({p2_pts:.1f})", s_str, w_num, p2_tm),
+                'Last Place Scorer': make_box_link(f"{plast_tm} ({plast_pts:.1f})", s_str, w_num, plast_tm),
+                'Bag_Margin_Num': bag_margin,
+                'Bag Margin (#1 vs #2)': f"{bag_margin:.2f}",
+                'Spread_Num': spread_1_12,
+                '1-to-12 Spread': f"{spread_1_12:.1f}"
+            })
+        if wk_rows:
+            wk_df = pd.DataFrame(wk_rows)
+            if lw_mode.startswith("Highest Scoring"):
+                # Filter to 12-team era (2018+) for fair total comparison, or sort by Tot_Num
+                sub = wk_df[wk_df['Teams'] == 12].sort_values(['Tot_Num', 'Season_Int'], ascending=[False, False]).head(20).reset_index(drop=True)
+                sub = apply_competition_rank(sub, 'Tot_Num', round_digits=1)
+                render_html_table(sub[['Rank', 'Season', 'Week', 'Combined League Pts', 'League Avg', '#1 Scorer (Bag)', 'Last Place Scorer', '1-to-12 Spread']])
+            elif lw_mode.startswith("Lowest Scoring"):
+                sub = wk_df[wk_df['Teams'] == 12].sort_values(['Tot_Num', 'Season_Int'], ascending=[True, False]).head(20).reset_index(drop=True)
+                sub = apply_competition_rank(sub, 'Tot_Num', round_digits=1)
+                render_html_table(sub[['Rank', 'Season', 'Week', 'Combined League Pts', 'League Avg', '#1 Scorer (Bag)', 'Last Place Scorer', '1-to-12 Spread']])
+            elif lw_mode.startswith("Tightest Bag"):
+                sub = wk_df[wk_df['Season_Int'] >= 2019].sort_values(['Bag_Margin_Num', 'Tot_Num'], ascending=[True, False]).head(20).reset_index(drop=True)
+                sub = apply_competition_rank(sub, 'Bag_Margin_Num', round_digits=2)
+                render_html_table(sub[['Rank', 'Season', 'Week', '#1 Scorer (Bag)', '#2 Scorer', 'Bag Margin (#1 vs #2)', 'League Avg']])
+            elif lw_mode.startswith("Largest 1-to-12"):
+                sub = wk_df[wk_df['Teams'] == 12].sort_values(['Spread_Num', 'Season_Int'], ascending=[False, False]).head(20).reset_index(drop=True)
+                sub = apply_competition_rank(sub, 'Spread_Num', round_digits=1)
+                render_html_table(sub[['Rank', 'Season', 'Week', '#1 Scorer (Bag)', 'Last Place Scorer', '1-to-12 Spread', 'League Avg']])
+            else:
+                sub = wk_df[wk_df['Teams'] == 12].sort_values(['Spread_Num', 'Season_Int'], ascending=[True, False]).head(20).reset_index(drop=True)
+                sub = apply_competition_rank(sub, 'Spread_Num', round_digits=1)
+                render_html_table(sub[['Rank', 'Season', 'Week', '#1 Scorer (Bag)', 'Last Place Scorer', '1-to-12 Spread', 'League Avg']])
+
+    elif rec_type == "Positional Scoring by Team (Season / All-Time)":
+        st.write("### Positional Scoring by Team (True Position Breakdown)")
+        st.write("Total starter points scored by each franchise broken down strictly by true player position (`QB`, `RB`, `WR`, `TE`, `D/ST`, `K`). Players started in the `RB/WR/TE` Flex slot are credited to their true position (`RB`, `WR`, or `TE`).")
+
+        c1, c2, c3 = st.columns([1.4, 1.8, 1.8])
+        with c1:
+            pos_szn_sel = st.selectbox("Select Season:", ["2026"] + [s for s in seasons_list if str(s) != "2026"] + ["All-Time"], key="pos_tbl_szn")
+        with c2:
+            pos_gm_scope = st.radio("Game Scope:", ["Regular Season Only", "Regular Season + Playoffs"], horizontal=True, key="pos_tbl_scope")
+        with c3:
+            pos_disp_unit = st.radio("Display Format:", ["Total Points", "Points Per Game (PPG)", "% Share of Team Points"], horizontal=True, key="pos_tbl_unit")
+
+        slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
+        pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+        pos_c = 'Position' if 'Position' in box_df.columns else ('Pos' if 'Pos' in box_df.columns else slot_c)
+
+        b_pos = box_df.copy()
+        b_pos['Season_Str'] = b_pos['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        b_pos['Week_Num'] = pd.to_numeric(b_pos['Week'], errors='coerce').fillna(0).astype(int)
+        b_pos['Team_Str'] = b_pos['Team_Name'].astype(str).str.strip()
+        b_pos['Pts_Num'] = pd.to_numeric(b_pos[pts_c], errors='coerce').fillna(0.0)
+        b_pos['Slot_Up'] = b_pos[slot_c].astype(str).str.strip().str.upper()
+
+        def _map_true_pos(r):
+            p = str(r[pos_c]).strip().upper()
+            s = str(r['Slot_Up']).strip().upper()
+            if p in ['K', 'PK'] or s in ['K', 'PK']: return 'K'
+            if p in ['D/ST', 'DST', 'DEF', 'DP'] or s in ['D/ST', 'DST', 'DEF']: return 'D/ST'
+            if p in ['QB', 'RB', 'WR', 'TE']: return p
+            if s in ['QB', 'RB', 'WR', 'TE']: return s
+            return p
+
+        b_pos['True_Pos'] = b_pos.apply(_map_true_pos, axis=1)
+        st_only = b_pos[~b_pos['Slot_Up'].isin(['BE', 'IR', 'BENCH', 'RES'])].copy()
+        del b_pos
+
+        allowed_gt = [1] if pos_gm_scope == "Regular Season Only" else [1, 2, 4]
+        el_g_pos = games[games['Game_Type'].isin(allowed_gt) & (games['Team_Name'].str.upper() != 'CAM')][['Season', 'Week', 'Team_Name']].drop_duplicates()
+        el_g_pos['Season_Str'] = el_g_pos['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        el_g_pos['Week_Num'] = pd.to_numeric(el_g_pos['Week'], errors='coerce').fillna(0).astype(int)
+        el_g_pos['Team_Str'] = el_g_pos['Team_Name'].astype(str).str.strip()
+
+        if pos_szn_sel != "All-Time":
+            st_only = st_only[st_only['Season_Str'] == str(pos_szn_sel)]
+            el_g_pos = el_g_pos[el_g_pos['Season_Str'] == str(pos_szn_sel)]
+
+        m_pos = pd.merge(st_only, el_g_pos[['Season_Str', 'Week_Num', 'Team_Str']], on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
+        gp_by_team = el_g_pos.groupby('Team_Str').size().to_dict()
+
+        if not m_pos.empty:
+            piv = m_pos.pivot_table(index='Team_Str', columns='True_Pos', values='Pts_Num', aggfunc='sum', fill_value=0.0)
+            pos_cols = ['QB', 'RB', 'WR', 'TE', 'D/ST', 'K']
+            for pc in pos_cols:
+                if pc not in piv.columns:
+                    piv[pc] = 0.0
+            piv['Total'] = piv[pos_cols].sum(axis=1)
+            piv = piv.sort_values('Total', ascending=False)
+
+            out_pos_rows = []
+            for tm_name, r_vals in piv.iterrows():
+                gp_cnt = max(1, int(gp_by_team.get(tm_name, 1)))
+                tot_v = float(r_vals['Total'])
+                row_d = {'Team': tm_name, 'GP': gp_cnt, 'Sort_Val': tot_v if pos_disp_unit != "Points Per Game (PPG)" else (tot_v / gp_cnt)}
+                for pc in pos_cols:
+                    v = float(r_vals[pc])
+                    if pos_disp_unit == "Total Points":
+                        row_d[pc] = f"{v:,.1f}"
+                    elif pos_disp_unit == "Points Per Game (PPG)":
+                        row_d[pc] = f"{v / gp_cnt:.1f}"
+                    else:
+                        row_d[pc] = f"{(v / tot_v * 100.0):.1f}%" if tot_v > 0 else "0.0%"
+                row_d['Total Pts'] = f"{tot_v:,.1f}"
+                row_d['PPG'] = f"{tot_v / gp_cnt:.1f}"
+                out_pos_rows.append(row_d)
+
+            pos_res_df = pd.DataFrame(out_pos_rows).sort_values('Sort_Val', ascending=False).reset_index(drop=True)
+            pos_res_df = apply_competition_rank(pos_res_df, 'Sort_Val', round_digits=1)
+            render_html_table(pos_res_df[['Rank', 'Team', 'GP', 'QB', 'RB', 'WR', 'TE', 'D/ST', 'K', 'Total Pts', 'PPG']])
+        else:
+            st.info("No positional scoring data found for the selected filter.")
 
 # ================= TAB 8: DRAFT =================
 elif active_tab == "Draft":
