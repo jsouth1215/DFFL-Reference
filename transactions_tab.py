@@ -131,18 +131,27 @@ def clean_2018_rows(df):
 
     return df.apply(fix_row, axis=1)
 
-@st.cache_data(ttl=600)
-def load_transactions_data(box_df=None):
+@st.cache_data(show_spinner=False)
+def load_transactions_data(_box_df=None, _v=2):
+    import os
+    box_df = _box_df
     dfs = []
-    try:
-        df_merged = pd.read_excel("espn_transactions_2018_2026.xlsx", sheet_name="Transactions", engine="openpyxl")
-        dfs.append(df_merged)
-    except Exception:
-        for fname in ["espn_transactions_2019_2026.xlsx", "espn_transactions_2018.xlsx"]:
+    if os.path.exists("cloud_cache_Transactions.pkl"):
+        try:
+            dfs.append(pd.read_pickle("cloud_cache_Transactions.pkl"))
+        except Exception:
+            pass
+    if not dfs:
+        for fname in ["espn_transactions_2018_2026.xlsx", "espn_transactions_2019_2026.xlsx", "espn_transactions_2018.xlsx"]:
+            if not os.path.exists(fname):
+                continue
             try:
                 dfs.append(pd.read_excel(fname, sheet_name="Transactions", engine="openpyxl"))
             except Exception:
-                pass
+                try:
+                    dfs.append(pd.read_excel(fname, sheet_name=0, engine="openpyxl"))
+                except Exception:
+                    pass
 
     if not dfs:
         return pd.DataFrame(), pd.DataFrame()

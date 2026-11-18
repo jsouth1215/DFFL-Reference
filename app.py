@@ -4049,6 +4049,9 @@ elif active_tab == "Draft":
 
 # ================= TAB 9: TRANSACTIONS =================
 elif active_tab == "Transactions":
+    import importlib, value_engine
+    importlib.reload(value_engine)
+    importlib.reload(transactions_tab)
     transactions_tab.render(box_df)
 
 # ================= TAB 10: PLAYERS =================

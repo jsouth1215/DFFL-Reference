@@ -267,8 +267,9 @@ def parse_trade_side_players(side_str):
             items.append(normalize_player_name(part))
     return items
 
-@st.cache_data(ttl=600, show_spinner=False)
-def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=3):
+@st.cache_data(show_spinner=False)
+def compute_draft_value_added(_draft_df, _box_df, _trades_df=None, _v=4):
+    draft_df, box_df, trades_df = _draft_df, _box_df, _trades_df
     b = normalize_box_df(box_df)
     if b.empty or draft_df is None or draft_df.empty:
         return pd.DataFrame()
@@ -383,8 +384,9 @@ def compute_draft_value_added(draft_df, box_df, trades_df=None, _v=3):
     d['Manager_DVA'] = d['Trade_Adj_DVA']
     return d
 
-@st.cache_data(ttl=600, show_spinner=False)
-def compute_waiver_value_added(tx_df, box_df, _v=3):
+@st.cache_data(show_spinner=False)
+def compute_waiver_value_added(_tx_df, _box_df, _v=4):
+    tx_df, box_df = _tx_df, _box_df
     b = normalize_box_df(box_df)
     if b.empty or tx_df is None or tx_df.empty:
         return pd.DataFrame()
@@ -465,8 +467,9 @@ def compute_waiver_value_added(tx_df, box_df, _v=3):
 
     return pd.DataFrame(rows)
 
-@st.cache_data(ttl=600, show_spinner=False)
-def compute_trade_value_added(trades_df, box_df, _v=3):
+@st.cache_data(show_spinner=False)
+def compute_trade_value_added(_trades_df, _box_df, _v=4):
+    trades_df, box_df = _trades_df, _box_df
     b = normalize_box_df(box_df)
     if b.empty or trades_df is None or trades_df.empty:
         return pd.DataFrame()
