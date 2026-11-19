@@ -278,8 +278,12 @@ def load_transactions_data(_box_df=None, _v=3):
 def render(box_df=None):
     if box_df is None or box_df.empty:
         try:
-            import app
-            box_df = app.load_box_scores()
+            import os, sys
+            if os.path.exists('cloud_cache_Box_Scores.pkl'):
+                box_df = pd.read_pickle('cloud_cache_Box_Scores.pkl')
+            else:
+                _loader = getattr(sys.modules.get('__main__'), 'load_box_scores', None)
+                box_df = _loader() if callable(_loader) else pd.DataFrame()
         except Exception:
             dfs_b = []
             for fn, sn in [("espn_fantasy_complete_stats_2017_2026.xlsx", "Box_Scores"), ("reconstructed_2018_box_scores.xlsx", "Box_Scores_2018"), ("reconstructed_2017_box_scores.xlsx", "Box_Scores_2017")]:

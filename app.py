@@ -4370,7 +4370,7 @@ elif active_tab == "Transactions":
 
 # ================= TAB 10: PLAYERS =================
 elif active_tab == "Players":
-    players_tab.render(box_df)
+    players_tab.render(box_df, render_player_records_fn=render_player_records_section)
 
 # ================= TAB 11: DEADBALL ERA =================
 elif active_tab == "Deadball Era":
