@@ -2418,6 +2418,8 @@ elif active_tab == "Franchise":
                 b_fr['Week_Num'] = pd.to_numeric(b_fr['Week'], errors='coerce').fillna(0).astype(int)
                 b_fr['Pts_Num'] = pd.to_numeric(b_fr[pts_c], errors='coerce').fillna(0.0)
                 b_fr = b_fr[~b_fr[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH', 'RES'])].copy()
+                keep_b_cols = list(dict.fromkeys(['Season_Str', 'Week_Num', name_c, pos_c, 'Pts_Num']))
+                b_fr = b_fr[keep_b_cols].copy()
 
                 el_fr = cg_fr[['Season_Str', 'Week_Num', 'Type', 'Opponent_Team_Name', 'Result', 'Signed_Margin']].drop_duplicates()
                 b_fr = pd.merge(b_fr, el_fr, on=['Season_Str', 'Week_Num'], how='inner')
