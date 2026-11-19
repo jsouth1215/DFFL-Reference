@@ -2136,7 +2136,7 @@ elif active_tab == "Franchise":
     with c_f2:
         fran_view = st.radio(
             "Franchise View:",
-            ["Season-by-Season", "Franchise Facts", "Playoff Game Log", "Head-to-Head vs. All Opponents", "Starter Scoring & NFL Breakdown"],
+            ["Season-by-Season", "Franchise Facts", "Franchise Records", "Playoff Game Log", "Head-to-Head vs. All Opponents", "Starter Scoring & NFL Breakdown"],
             horizontal=True,
             label_visibility="collapsed",
             key="fran_sub_view"
@@ -2274,9 +2274,18 @@ elif active_tab == "Franchise":
         pa_team = pa_ranks[pa_ranks['Team_Name'] == selected_team].rename(columns={'Season_Str': 'Season', 'Opp_Points': 'PA Rank'})
         szn_stats = pd.merge(pd.merge(szn_stats, pf_team[['Season', 'PF Rank']], on='Season', how='left'), pa_team[['Season', 'PA Rank']], on='Season', how='left')
 
-        szn_stats['Playoff Outcome'] = [get_playoff_outcome(playoffs[playoffs['Season'] == s]) for s in szn_stats['Season']]
+        szn_stats['Playoff Outcome'] = [
+            "🏆 Champion" if get_playoff_outcome(playoffs[playoffs['Season'] == s]) == "Champion"
+            else get_playoff_outcome(playoffs[playoffs['Season'] == s])
+            for s in szn_stats['Season']
+        ]
         mgr_games['Season_Str'] = mgr_games['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         szn_stats['Weekly Bags'] = szn_stats['Season'].map(mgr_games.groupby('Season_Str')['Is_Weekly_First'].sum().to_dict()).fillna(0).astype(int)
+
+        all_reg['Weekly_Min'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Actual_Points'].transform('min')
+        all_reg['Is_Weekly_Last'] = (all_reg['Actual_Points'] == all_reg['Weekly_Min']).astype(int)
+        lp_by_szn = all_reg[all_reg['Team_Name'] == selected_team].groupby('Season_Str')['Is_Weekly_Last'].sum().to_dict()
+        szn_stats['Weekly Last Place Finishes'] = szn_stats['Season'].apply(lambda s: int(lp_by_szn.get(str(s).replace('.0', '').strip(), 0)))
 
         all_reg['Weekly_Rank'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Actual_Points'].rank(ascending=False, method='average')
         all_reg['N_Teams'] = all_reg.groupby(['Season_Str', 'Week_Num'])['Team_Name'].transform('count')
@@ -2302,7 +2311,12 @@ elif active_tab == "Franchise":
 
         szn_stats['Season_Sort'] = pd.to_numeric(szn_stats['Season'], errors='coerce').fillna(0)
         szn_stats = szn_stats.sort_values('Season_Sort', ascending=False).reset_index(drop=True)
-        disp_cols = ['Season', 'W', 'L', 'Win %', 'Longest Win Streak', 'Longest Losing Streak', 'Standings Finish', 'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank', 'Playoff Outcome', 'Weekly Bags', 'Expected Wins', 'Luck Factor', 'Top QB', 'Top RB', 'Top WR', 'Top TE']
+        disp_cols = [
+            'Season', 'W', 'L', 'Standings Finish', 'Playoff Outcome',
+            'PF', 'PF/G', 'PF Rank', 'PA', 'PA/G', 'PA Rank',
+            'Expected Wins', 'Luck Factor', 'Weekly Bags', 'Weekly Last Place Finishes',
+            'Longest Win Streak', 'Longest Losing Streak', 'Top QB', 'Top RB', 'Top WR', 'Top TE'
+        ]
         hl_cells = lambda row: ['background-color: #ebebeb; color: #888888;' if (str(row.get('Season','')).strip() in ['2017', '2018'] and c == 'Weekly Bags') else '' for c in row.index]
         render_html_table(szn_stats[disp_cols], hl_cells)
 
@@ -2319,20 +2333,154 @@ elif active_tab == "Franchise":
         else:
             st.write("No playoff appearances on record.")
 
+    elif fran_view == "Franchise Records":
+        st.write(f"### {selected_team} — Franchise Record Book")
+        fr_rec_sel = st.radio(
+            "Select Franchise Record:",
+            [
+                "Top 10 Highest Scores",
+                "Top 10 Lowest Scores",
+                "Biggest Blowout Wins",
+                "Biggest Blowout Losses",
+                "Closest Games",
+                "Highest Scoring Players",
+                "Weekly Bag Weeks",
+                "Weekly Last Place Weeks",
+                "Negative Starters"
+            ],
+            horizontal=True,
+            key="fran_indiv_rec_sel"
+        )
+        st.write("---")
+
+        cg_fr = comp_games.copy()
+        cg_fr['Season_Str'] = cg_fr['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        cg_fr['Type'] = cg_fr['Game_Type'].map({1: 'Regular Season', 2: 'Playoffs'}).fillna('Other')
+        cg_fr['Signed_Margin'] = cg_fr['Actual_Points'] - cg_fr['Opp_Points']
+        cg_fr['Abs_Margin'] = cg_fr['Signed_Margin'].abs()
+
+        def _fmt_game_tbl(sub_df, show_margin=True):
+            if sub_df.empty:
+                st.info("No qualifying games found.")
+                return
+            d_out = sub_df.reset_index(drop=True).copy()
+            d_out['Rank'] = d_out.index + 1
+            d_out['Points'] = d_out.apply(lambda r: make_box_link(f"{float(r['Actual_Points']):.1f}", r['Season_Str'], r['Week'], selected_team), axis=1)
+            d_out['Opp Pts'] = d_out.apply(lambda r: make_box_link(f"{float(r['Opp_Points']):.1f}", r['Season_Str'], r['Week'], r['Opponent_Team_Name']), axis=1)
+            d_out['Margin'] = d_out['Signed_Margin'].apply(lambda x: f"{float(x):+.1f}")
+            cols_g = ['Rank', 'Season_Str', 'Week', 'Type', 'Opponent_Team_Name', 'Result', 'Points', 'Opp Pts']
+            if show_margin:
+                cols_g.append('Margin')
+            render_html_table(d_out[cols_g].rename(columns={'Season_Str': 'Season', 'Opponent_Team_Name': 'Opponent'}))
+
+        if fr_rec_sel == "Top 10 Highest Scores":
+            _fmt_game_tbl(cg_fr.sort_values('Actual_Points', ascending=False).head(10))
+        elif fr_rec_sel == "Top 10 Lowest Scores":
+            _fmt_game_tbl(cg_fr[cg_fr['Actual_Points'] > 0].sort_values('Actual_Points', ascending=True).head(10))
+        elif fr_rec_sel == "Biggest Blowout Wins":
+            _fmt_game_tbl(cg_fr[cg_fr['W'] == 1].sort_values('Signed_Margin', ascending=False).head(10))
+        elif fr_rec_sel == "Biggest Blowout Losses":
+            _fmt_game_tbl(cg_fr[cg_fr['L'] == 1].sort_values('Signed_Margin', ascending=True).head(10))
+        elif fr_rec_sel == "Closest Games":
+            _fmt_game_tbl(cg_fr.sort_values(['Abs_Margin', 'Season_Num', 'Week_Num'], ascending=[True, False, False]).head(10))
+        elif fr_rec_sel == "Weekly Bag Weeks":
+            bags_fr = mgr_games[(mgr_games['Game_Type'] == 1) & (mgr_games['Is_Weekly_First'] == 1) & (mgr_games['Season_Num'] >= 2019)].copy()
+            if bags_fr.empty:
+                st.info(f"{selected_team} has no weekly bags on record (2019+).")
+            else:
+                bags_fr['Season_Str'] = bags_fr['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                bags_fr['Type'] = 'Regular Season'
+                bags_fr['Signed_Margin'] = bags_fr['Actual_Points'] - bags_fr['Opp_Points']
+                _fmt_game_tbl(bags_fr.sort_values(['Actual_Points', 'Season_Num', 'Week_Num'], ascending=[False, False, False]))
+        elif fr_rec_sel == "Weekly Last Place Weeks":
+            reg_all_lp = games[(games['Game_Type'] == 1) & (games['Season_Num'] >= 2017)].copy()
+            reg_all_lp['Season_Str'] = reg_all_lp['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            reg_all_lp['Wk_Min'] = reg_all_lp.groupby(['Season_Str', 'Week_Num'])['Actual_Points'].transform('min')
+            lp_fr = reg_all_lp[(reg_all_lp['Team_Name'] == selected_team) & (reg_all_lp['Actual_Points'] == reg_all_lp['Wk_Min'])].copy()
+            if lp_fr.empty:
+                st.info(f"{selected_team} has no weekly last place finishes on record.")
+            else:
+                lp_fr['Result'] = lp_fr.apply(lambda x: 'W' if x['W'] else ('L' if x['L'] else 'T'), axis=1)
+                lp_fr['Type'] = 'Regular Season'
+                lp_fr['Signed_Margin'] = lp_fr['Actual_Points'] - lp_fr['Opp_Points']
+                _fmt_game_tbl(lp_fr.sort_values(['Actual_Points', 'Season_Num', 'Week_Num'], ascending=[True, False, False]))
+        elif fr_rec_sel in ["Highest Scoring Players", "Negative Starters"]:
+            if box_df.empty:
+                st.info("Box score data not available.")
+            else:
+                slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
+                name_c = 'Player_Name' if 'Player_Name' in box_df.columns else 'Player'
+                pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+                pos_c = 'Position' if 'Position' in box_df.columns else ('Pos' if 'Pos' in box_df.columns else slot_c)
+
+                b_fr = box_df[box_df['Team_Name'].astype(str).str.strip() == selected_team].copy()
+                b_fr['Season_Str'] = b_fr['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                b_fr['Week_Num'] = pd.to_numeric(b_fr['Week'], errors='coerce').fillna(0).astype(int)
+                b_fr['Pts_Num'] = pd.to_numeric(b_fr[pts_c], errors='coerce').fillna(0.0)
+                b_fr = b_fr[~b_fr[slot_c].astype(str).str.strip().str.upper().isin(['BE', 'IR', 'BENCH', 'RES'])].copy()
+
+                el_fr = cg_fr[['Season_Str', 'Week_Num', 'Type', 'Opponent_Team_Name', 'Result', 'Signed_Margin']].drop_duplicates()
+                b_fr = pd.merge(b_fr, el_fr, on=['Season_Str', 'Week_Num'], how='inner')
+
+                if fr_rec_sel == "Highest Scoring Players":
+                    pos_f_fr = st.selectbox("Position Filter:", ["All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="fran_top_pl_pos")
+                    if pos_f_fr != "All Positions":
+                        b_fr = b_fr[b_fr[pos_c].astype(str).str.strip().str.upper() == pos_f_fr]
+                    top_p = b_fr.sort_values('Pts_Num', ascending=False).head(15).reset_index(drop=True)
+                    if top_p.empty:
+                        st.info("No player performances found.")
+                    else:
+                        top_p['Rank'] = top_p.index + 1
+                        top_p['Points'] = top_p.apply(lambda r: make_box_link(f"{float(r['Pts_Num']):.1f}", r['Season_Str'], r['Week_Num'], selected_team), axis=1)
+                        disp_p = top_p[['Rank', name_c, pos_c, 'Season_Str', 'Week_Num', 'Type', 'Opponent_Team_Name', 'Result', 'Points']].rename(
+                            columns={name_c: 'Player', pos_c: 'Pos', 'Season_Str': 'Season', 'Week_Num': 'Week', 'Opponent_Team_Name': 'Opponent'}
+                        )
+                        render_html_table(disp_p)
+                else:
+                    neg_p = b_fr[b_fr['Pts_Num'] < 0].sort_values(['Pts_Num', 'Season_Str', 'Week_Num'], ascending=[True, False, False]).reset_index(drop=True)
+                    if neg_p.empty:
+                        st.info(f"{selected_team} has no negative starter games on record.")
+                    else:
+                        neg_p['Rank'] = neg_p.index + 1
+                        neg_p['Points'] = neg_p.apply(lambda r: make_box_link(f"{float(r['Pts_Num']):.1f}", r['Season_Str'], r['Week_Num'], selected_team), axis=1)
+                        neg_p['Margin'] = neg_p['Signed_Margin'].apply(lambda x: f"{float(x):+.1f}")
+                        disp_n = neg_p[['Rank', name_c, pos_c, 'Season_Str', 'Week_Num', 'Type', 'Opponent_Team_Name', 'Result', 'Margin', 'Points']].rename(
+                            columns={name_c: 'Player', pos_c: 'Pos', 'Season_Str': 'Season', 'Week_Num': 'Week', 'Opponent_Team_Name': 'Opponent'}
+                        )
+                        render_html_table(disp_n)
+
     elif fran_view == "Head-to-Head vs. All Opponents":
         st.write("### Head-to-Head vs. All Opponents")
         opp_list = []
         for opp in sorted([t for t in teams if t != selected_team]):
-            og = games[(games['Team_Name'] == selected_team) & (games['Opponent_Team_Name'] == opp) & (games['Game_Type'].isin([1, 2]))]
+            og = games[(games['Team_Name'] == selected_team) & (games['Opponent_Team_Name'] == opp) & (games['Game_Type'].isin([1, 2]))].sort_values(['Season_Num', 'Week_Num', 'Game_Type'])
             if og.empty: continue
             w_cnt, l_cnt, t_cnt = int(og['W'].sum()), int(og['L'].sum()), int(og['T'].sum())
             tot_g = w_cnt + l_cnt + t_cnt
             wp = w_cnt / tot_g if tot_g > 0 else 0.0
             po_g = og[og['Game_Type'] == 2]
             po_rec = f"{int(po_g['W'].sum())}-{int(po_g['L'].sum())}" + (f"-{int(po_g['T'].sum())}" if po_g['T'].sum()>0 else "") if len(po_g)>0 else "-"
-            opp_list.append({'Opponent': opp, 'GP': tot_g, 'W': w_cnt, 'L': l_cnt, 'T': t_cnt, 'Win_Pct_Raw': wp, 'Win %': f"{wp:.3f}".replace("0.", ".", 1) if wp < 1 else f"{wp:.3f}", 'PF': int(round(og['Actual_Points'].sum())), 'PA': int(round(og['Opp_Points'].sum())), 'Playoff Record': po_rec})
+            # Compute active H2H streak from most recent matchup backward
+            res_seq = ['W' if r['W'] == 1 else ('L' if r['L'] == 1 else 'T') for _, r in og.iterrows()]
+            last_res = res_seq[-1]
+            st_len = 0
+            for rv in reversed(res_seq):
+                if rv == last_res:
+                    st_len += 1
+                else:
+                    break
+            active_streak_str = f"{last_res}{st_len}"
+            opp_list.append({
+                'Opponent': opp, 'GP': tot_g, 'W': w_cnt, 'L': l_cnt, 'T': t_cnt,
+                'Win_Pct_Raw': wp,
+                'Win %': f"{wp:.3f}".replace("0.", ".", 1) if wp < 1 else f"{wp:.3f}",
+                'Active Streak': active_streak_str,
+                'PF': int(round(og['Actual_Points'].sum())),
+                'PA': int(round(og['Opp_Points'].sum())),
+                'Playoff Record': po_rec
+            })
         if opp_list:
-            render_html_table(pd.DataFrame(opp_list).sort_values(['Win_Pct_Raw', 'W', 'GP'], ascending=[False, False, False])[['Opponent', 'GP', 'W', 'L', 'Win %', 'PF', 'PA', 'Playoff Record']])
+            render_html_table(pd.DataFrame(opp_list).sort_values(['Win_Pct_Raw', 'W', 'GP'], ascending=[False, False, False])[['Opponent', 'GP', 'W', 'L', 'Win %', 'Active Streak', 'PF', 'PA', 'Playoff Record']])
 
     elif fran_view == "Starter Scoring & NFL Breakdown":
         render_franchise_starter_breakdown(selected_team, box_df, games, seasons_list)
@@ -2376,62 +2524,106 @@ elif active_tab == "Schedule":
     else:
         s_str = str(s_szn).replace('.0', '').strip()
         reg_szn = games[(games['Season'] == s_str) & (games['Game_Type'] == 1)].copy()
-        target_sched = reg_szn[reg_szn['Team_Name'] == s_team].sort_values('Week_Num')
-        if target_sched.empty:
-            st.info(f"No regular season schedule found for {s_team} in {s_str}.")
+        swap_display_mode = st.radio(
+            "What-If View:",
+            ["Single Schedule Breakdown", "Full 12x12 Schedule Matrix"],
+            horizontal=True,
+            key="sched_swap_disp_mode"
+        )
+        if reg_szn.empty:
+            st.info(f"No regular season schedule found for {s_str}.")
         else:
-            st.markdown(f"### What If Everyone Played **{s_team}'s** {s_str} Schedule?")
-            st.caption(f"Shows each manager's hypothetical regular-season record if they faced **{s_team}'s** weekly opponents. Weeks where a manager would face themselves result in a natural Tie (`T`).")
-
-            # Map (Week_Num, Team_Name) -> Actual_Points
             pts_lookup = dict(zip(zip(reg_szn['Week_Num'].astype(int), reg_szn['Team_Name'].astype(str).str.strip()), reg_szn['Actual_Points'].astype(float)))
-            target_opps = [(int(r['Week_Num']), str(r['Opponent_Team_Name']).strip()) for _, r in target_sched.iterrows()]
-
             actual_recs = reg_szn.groupby('Team_Name').agg(W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')).to_dict('index')
             all_szn_teams = sorted(reg_szn['Team_Name'].dropna().unique().tolist())
 
-            swap_rows = []
-            for cand_tm in all_szn_teams:
-                hw, hl, ht, h_pa = 0, 0, 0, 0.0
-                for wk_n, opp_tm in target_opps:
-                    cand_pts = pts_lookup.get((wk_n, cand_tm))
-                    opp_pts = pts_lookup.get((wk_n, opp_tm))
-                    if cand_pts is None or opp_pts is None:
-                        continue
-                    h_pa += opp_pts
-                    if opp_tm == cand_tm or abs(cand_pts - opp_pts) < 1e-6:
-                        ht += 1
-                    elif cand_pts > opp_pts:
-                        hw += 1
-                    else:
-                        hl += 1
-                gp = hw + hl + ht
-                win_pct = (hw + 0.5 * ht) / gp if gp > 0 else 0.0
-                act = actual_recs.get(cand_tm, {'W': 0, 'L': 0, 'T': 0, 'PF': 0.0})
-                act_w, act_l, act_t = int(act['W']), int(act['L']), int(act['T'])
-                act_str = f"{act_w}-{act_l}" + (f"-{act_t}" if act_t > 0 else "")
-                hyp_str = f"{hw}-{hl}" + (f"-{ht}" if ht > 0 else "")
-                w_diff = (hw + 0.5 * ht) - (act_w + 0.5 * act_t)
-                diff_str = "0.0" if abs(w_diff) < 0.05 else f"{w_diff:+.1f}"
-                swap_rows.append({
-                    'Team': cand_tm,
-                    f"Record w/ {s_team}'s Schedule": hyp_str,
-                    'Hyp_W': hw,
-                    'Hyp_L': hl,
-                    'Hyp_T': ht,
-                    'Win_Pct_Num': win_pct,
-                    'Win %': f"{win_pct:.3f}".replace("0.", ".", 1) if win_pct < 1 else f"{win_pct:.3f}",
-                    'Actual Record': act_str,
-                    'Win Delta': diff_str,
-                    'PF_Num': float(act['PF']),
-                    'PF': f"{float(act['PF']):.1f}",
-                    'Hypothetical PA': f"{h_pa:.1f}"
-                })
-            swap_df = pd.DataFrame(swap_rows).sort_values(['Win_Pct_Num', 'Hyp_W', 'PF_Num'], ascending=[False, False, False]).reset_index(drop=True)
-            swap_df['Rank'] = (swap_df.index + 1).map(format_ordinal)
-            disp_swap_cols = ['Rank', 'Team', f"Record w/ {s_team}'s Schedule", 'Win %', 'Actual Record', 'Win Delta', 'PF', 'Hypothetical PA']
-            hl_swap = lambda r: ['background-color: #eff6ff; font-weight: 700;' if str(r.get('Team', '')) == s_team else '' for _ in r.index]
-            render_html_table(swap_df[disp_swap_cols], highlight_fn=hl_swap)
+            if swap_display_mode == "Single Schedule Breakdown":
+                target_sched = reg_szn[reg_szn['Team_Name'] == s_team].sort_values('Week_Num')
+                if target_sched.empty:
+                    st.info(f"No regular season schedule found for {s_team} in {s_str}.")
+                else:
+                    st.markdown(f"### What If Everyone Played **{s_team}'s** {s_str} Schedule?")
+                    st.caption(f"Shows each manager's hypothetical regular-season record if they faced **{s_team}'s** weekly opponents. Weeks where a manager would face themselves result in a natural Tie (`T`).")
+                    target_opps = [(int(r['Week_Num']), str(r['Opponent_Team_Name']).strip()) for _, r in target_sched.iterrows()]
+                    swap_rows = []
+                    for cand_tm in all_szn_teams:
+                        hw, hl, ht, h_pa = 0, 0, 0, 0.0
+                        for wk_n, opp_tm in target_opps:
+                            cand_pts = pts_lookup.get((wk_n, cand_tm))
+                            opp_pts = pts_lookup.get((wk_n, opp_tm))
+                            if cand_pts is None or opp_pts is None:
+                                continue
+                            h_pa += opp_pts
+                            if opp_tm == cand_tm or abs(cand_pts - opp_pts) < 1e-6:
+                                ht += 1
+                            elif cand_pts > opp_pts:
+                                hw += 1
+                            else:
+                                hl += 1
+                        gp = hw + hl + ht
+                        win_pct = (hw + 0.5 * ht) / gp if gp > 0 else 0.0
+                        act = actual_recs.get(cand_tm, {'W': 0, 'L': 0, 'T': 0, 'PF': 0.0})
+                        act_w, act_l, act_t = int(act['W']), int(act['L']), int(act['T'])
+                        act_str = f"{act_w}-{act_l}" + (f"-{act_t}" if act_t > 0 else "")
+                        hyp_str = f"{hw}-{hl}" + (f"-{ht}" if ht > 0 else "")
+                        w_diff = (hw + 0.5 * ht) - (act_w + 0.5 * act_t)
+                        diff_str = "0.0" if abs(w_diff) < 0.05 else f"{w_diff:+.1f}"
+                        swap_rows.append({
+                            'Team': cand_tm,
+                            f"Record w/ {s_team}'s Schedule": hyp_str,
+                            'Hyp_W': hw, 'Hyp_L': hl, 'Hyp_T': ht,
+                            'Win_Pct_Num': win_pct,
+                            'Win %': f"{win_pct:.3f}".replace("0.", ".", 1) if win_pct < 1 else f"{win_pct:.3f}",
+                            'Actual Record': act_str,
+                            'Win Delta': diff_str,
+                            'PF_Num': float(act['PF']),
+                            'PF': f"{float(act['PF']):.1f}",
+                            'Hypothetical PA': f"{h_pa:.1f}"
+                        })
+                    swap_df = pd.DataFrame(swap_rows).sort_values(['Win_Pct_Num', 'Hyp_W', 'PF_Num'], ascending=[False, False, False]).reset_index(drop=True)
+                    swap_df['Rank'] = (swap_df.index + 1).map(format_ordinal)
+                    disp_swap_cols = ['Rank', 'Team', f"Record w/ {s_team}'s Schedule", 'Win %', 'Actual Record', 'Win Delta', 'PF', 'Hypothetical PA']
+                    hl_swap = lambda r: ['background-color: #eff6ff; font-weight: 700;' if str(r.get('Team', '')) == s_team else '' for _ in r.index]
+                    render_html_table(swap_df[disp_swap_cols], highlight_fn=hl_swap)
+            else:
+                st.markdown(f"### {s_str} Full Schedule Swap Matrix (All Teams vs. All Schedules)")
+                st.caption("Rows = **Manager's Actual Weekly Scores**. Columns = **Whose Schedule They Played**. Highlighted diagonal cells show each manager's actual regular-season record.")
+                sched_by_owner = {
+                    tm: [(int(r['Week_Num']), str(r['Opponent_Team_Name']).strip()) for _, r in reg_szn[reg_szn['Team_Name'] == tm].sort_values('Week_Num').iterrows()]
+                    for tm in all_szn_teams
+                }
+                mat_rows = []
+                for row_tm in all_szn_teams:
+                    r_dict = {'Team (Scores)': row_tm}
+                    tot_w_eq = 0.0
+                    n_scheds = 0
+                    for col_tm in all_szn_teams:
+                        hw, hl, ht = 0, 0, 0
+                        for wk_n, opp_tm in sched_by_owner.get(col_tm, []):
+                            cand_pts = pts_lookup.get((wk_n, row_tm))
+                            opp_pts = pts_lookup.get((wk_n, opp_tm))
+                            if cand_pts is None or opp_pts is None:
+                                continue
+                            if opp_tm == row_tm or abs(cand_pts - opp_pts) < 1e-6:
+                                ht += 1
+                            elif cand_pts > opp_pts:
+                                hw += 1
+                            else:
+                                hl += 1
+                        r_dict[col_tm] = f"{hw}-{hl}" + (f"-{ht}" if ht > 0 else "")
+                        tot_w_eq += (hw + 0.5 * ht)
+                        n_scheds += 1
+                    r_dict['Avg_W_Num'] = tot_w_eq / n_scheds if n_scheds > 0 else 0.0
+                    r_dict['Avg Wins'] = f"{r_dict['Avg_W_Num']:.1f}"
+                    mat_rows.append(r_dict)
+                mat_df = pd.DataFrame(mat_rows).sort_values('Avg_W_Num', ascending=False).reset_index(drop=True)
+                ordered_cols = ['Team (Scores)'] + all_szn_teams + ['Avg Wins']
+                hl_mat = lambda r: [
+                    'background-color: #dbeafe; font-weight: 700; color: #1e3a8a;' if c == r['Team (Scores)']
+                    else ('font-weight: 700; background-color: #f8fafc;' if c == 'Avg Wins' else '')
+                    for c in r.index
+                ]
+                render_html_table(mat_df[ordered_cols], highlight_fn=hl_mat)
 
 # ================= TAB 6: BOX SCORES =================
 elif active_tab == "Box Scores":
@@ -2878,24 +3070,26 @@ elif active_tab == "Standings":
 
 elif active_tab == "Records":
     rec_categories = {
-        "Game Records": [
+        "Single-Game Scoring": [
             "Highest Scoring Weeks",
             "Lowest Scoring Weeks",
             "Highest Scoring Losses",
             "Lowest Scoring Wins",
-            "Lowest Scoring Weekly Bags",
-            "Largest Monday Night Comebacks",
+            "Lowest Scoring Weekly Bags"
+        ],
+        "Swings & Heartbreaks": [
             "Biggest Blowouts",
             "Closest Games",
+            "Largest Monday Night Comebacks",
             "Negative Starter Heartbreaks",
             "Managerial Regret (Bench Heartbreaks)",
             "Kicker Margin Games",
-            "Biggest Positional Discrepancies (QB, D/ST, K)",
-            "League-Wide Weekly Scoring Records"
+            "Biggest Positional Discrepancies (QB, D/ST, K)"
         ],
         "Season Records": [
             "Most Points Per Game in a Season",
             "Least Points Per Game in a Season",
+            "Most & Least PPG in a Season by Position",
             "Longest Win Streak",
             "Longest Losing Streak",
             "Highest Season Luck Factor",
@@ -2907,7 +3101,6 @@ elif active_tab == "Records":
             "Team Record - Lowest Score",
             "Weekly Bag by Team",
             "Weekly Last Place Score by Team",
-            "Playoff Record by Team",
             "Longest Head-to-Head Streaks"
         ],
         "Player & Lineup Records": [
@@ -2917,16 +3110,17 @@ elif active_tab == "Records":
             "Situational Lineup Records",
             "Roster & Starter Milestones"
         ],
-        "Other": [
+        "League-Wide & Matrices": [
+            "League-Wide Weekly Scoring Records",
             "Positional Scoring by Team (Season / All-Time)",
             "Weekly Scoring Rank Heatmap",
             "NFL Franchise Usage Matrix (12 Teams x 32 NFL Teams)"
         ]
     }
     if 'Top_2_Game' in games.columns:
-        rec_categories["Game Records"].append("Top 2 Matchups")
+        rec_categories["Single-Game Scoring"].append("Top 2 Matchups")
     if 'Bottom_2_Game' in games.columns:
-        rec_categories["Game Records"].append("Bottom 2 Matchups")
+        rec_categories["Single-Game Scoring"].append("Bottom 2 Matchups")
 
     sel_grp = st.radio("Record Category:", list(rec_categories.keys()), horizontal=True, key="rec_cat_group")
     rec_type = st.radio("Select Record:", rec_categories[sel_grp], horizontal=True, key="rec_sub_type")
@@ -3203,6 +3397,79 @@ elif active_tab == "Records":
             if any(low['Season'] == '2026'):
                 st.caption(r"\* *Active season*")
 
+    elif rec_type == "Most & Least PPG in a Season by Position":
+        st.write("### Most & Least PPG in a Season by Position (True Position Breakdown)")
+        st.caption("Uses the exact true-position starter breakdown (`QB`, `RB`, `WR`, `TE`, `D/ST`, `K` — players started in `RB/WR/TE` Flex are credited to their true position), divided by games played in that season.")
+        if box_df.empty:
+            st.info("Box score data not available.")
+        else:
+            cp1, cp2, cp3 = st.columns([1.2, 1.4, 2.0])
+            pos_rec_sel = cp1.selectbox("Position:", ["QB", "RB", "WR", "TE", "D/ST", "K"], key="pos_ppg_rec_pos")
+            pos_rec_dir = cp2.radio("Ranking:", ["Most PPG", "Least PPG"], horizontal=True, key="pos_ppg_rec_dir")
+            pos_rec_scope = cp3.radio("Game Scope:", ["Regular Season Only", "Regular Season + Playoffs"], horizontal=True, key="pos_ppg_rec_scope")
+
+            slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
+            pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
+            pos_c = 'Position' if 'Position' in box_df.columns else ('Pos' if 'Pos' in box_df.columns else slot_c)
+
+            b_pp = box_df.copy()
+            b_pp['Season_Str'] = b_pp['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            b_pp['Week_Num'] = pd.to_numeric(b_pp['Week'], errors='coerce').fillna(0).astype(int)
+            b_pp['Team_Str'] = b_pp['Team_Name'].astype(str).str.strip()
+            b_pp['Pts_Num'] = pd.to_numeric(b_pp[pts_c], errors='coerce').fillna(0.0)
+            b_pp['Slot_Up'] = b_pp[slot_c].astype(str).str.strip().str.upper()
+
+            def _map_tp_rec(r):
+                p = str(r[pos_c]).strip().upper()
+                s = str(r['Slot_Up']).strip().upper()
+                if p in ['K', 'PK'] or s in ['K', 'PK']: return 'K'
+                if p in ['D/ST', 'DST', 'DEF', 'DP'] or s in ['D/ST', 'DST', 'DEF']: return 'D/ST'
+                if p in ['QB', 'RB', 'WR', 'TE']: return p
+                if s in ['QB', 'RB', 'WR', 'TE']: return s
+                return p
+
+            b_pp['True_Pos'] = b_pp.apply(_map_tp_rec, axis=1)
+            st_pp = b_pp[(~b_pp['Slot_Up'].isin(['BE', 'IR', 'BENCH', 'RES'])) & (b_pp['True_Pos'] == pos_rec_sel)].copy()
+            del b_pp
+
+            allowed_gt_pp = [1] if pos_rec_scope == "Regular Season Only" else [1, 2, 4]
+            el_pp = games[games['Game_Type'].isin(allowed_gt_pp) & (games['Team_Name'].str.upper() != 'CAM')][['Season', 'Week', 'Team_Name']].drop_duplicates()
+            el_pp['Season_Str'] = el_pp['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            el_pp['Week_Num'] = pd.to_numeric(el_pp['Week'], errors='coerce').fillna(0).astype(int)
+            el_pp['Team_Str'] = el_pp['Team_Name'].astype(str).str.strip()
+
+            gp_szn_tm = el_pp.groupby(['Season_Str', 'Team_Str']).size().reset_index(name='Games')
+            m_pp = pd.merge(st_pp, el_pp[['Season_Str', 'Week_Num', 'Team_Str']], on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
+            pts_szn_tm = m_pp.groupby(['Season_Str', 'Team_Str'])['Pts_Num'].sum().reset_index(name='Total_Pts')
+
+            res_pp = pd.merge(gp_szn_tm, pts_szn_tm, on=['Season_Str', 'Team_Str'], how='left')
+            res_pp['Total_Pts'] = res_pp['Total_Pts'].fillna(0.0)
+            res_pp = res_pp[res_pp['Games'] > 0].copy()
+            res_pp['PPG_Num'] = res_pp['Total_Pts'] / res_pp['Games']
+
+            # Pull season record map from s_agg if available
+            rec_szn_map = {(str(r['Season']), str(r['Team'])): str(r['Record']) for _, r in s_agg.iterrows()} if not s_agg.empty else {}
+            res_pp['Record'] = res_pp.apply(lambda r: rec_szn_map.get((r['Season_Str'], r['Team_Str']), ""), axis=1)
+            res_pp['Regular Season Finish'] = res_pp.apply(lambda r: rs_map.get((r['Season_Str'], r['Team_Str']), ""), axis=1)
+            res_pp['Playoff Outcome'] = res_pp.apply(lambda r: po_map.get((r['Season_Str'], r['Team_Str']), ""), axis=1)
+
+            asc_pp = (pos_rec_dir == "Least PPG")
+            lim_pp = 20 if asc_pp else 15
+            ranked_pp = res_pp.sort_values(['PPG_Num', 'Season_Str'], ascending=[asc_pp, False]).head(lim_pp).reset_index(drop=True)
+            ranked_pp = apply_competition_rank(ranked_pp, 'PPG_Num', round_digits=1)
+            ranked_pp['Season_Display'] = ranked_pp['Season_Str'].apply(lambda s: f"{s}*" if str(s) == '2026' else str(s))
+            ranked_pp[f'{pos_rec_sel} PPG'] = ranked_pp['PPG_Num'].apply(lambda x: f"{float(x):.1f}")
+            ranked_pp[f'{pos_rec_sel} Total Pts'] = ranked_pp['Total_Pts'].apply(lambda x: f"{float(x):.1f}")
+
+            render_html_table(
+                ranked_pp[['Rank', 'Season_Display', 'Team_Str', 'Record', 'Games', f'{pos_rec_sel} PPG', f'{pos_rec_sel} Total Pts', 'Regular Season Finish', 'Playoff Outcome']].rename(
+                    columns={'Season_Display': 'Season', 'Team_Str': 'Team'}
+                ),
+                highlight_fn=lambda r: ['font-style: italic; color: #1e3a8a;' if '*' in str(r.get('Season', '')) else '' for _ in r.index]
+            )
+            if any(ranked_pp['Season_Str'] == '2026'):
+                st.caption(r"\* *Active season*")
+
     elif rec_type == "Longest Win Streak":
         w_df, _ = get_all_streaks_records(games)
         if not w_df.empty:
@@ -3266,38 +3533,6 @@ elif active_tab == "Records":
         reg['Is_Low'] = (reg['Actual_Points'] == min_p)
         data = [{'Team': t, **{s: int(reg[(reg['Team_Name']==t) & (reg['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()==s)]['Is_Low'].sum()) for s in lp_szns}, 'Total': int(reg[(reg['Team_Name']==t) & (reg['Season'].isin(lp_szns))]['Is_Low'].sum())} for t in teams]
         render_html_table(pd.DataFrame(data).sort_values(['Total', 'Team'], ascending=[False, True])[['Team'] + lp_szns + ['Total']])
-
-    elif rec_type == "Playoff Record by Team":
-        po_rows = []
-        for t in teams_no_cam:
-            apps, byes = 0, 0
-            if not rs_ranks_df.empty and 'Team_Name' in rs_ranks_df.columns:
-                for _, r in rs_ranks_df[rs_ranks_df['Team_Name'] == t].iterrows():
-                    szn = str(r['Season']).strip()
-                    if szn.isdigit() and szn in completed_playoff_seasons:
-                        s_int, rk = int(szn), float(r['RS_Rank'])
-                        if pd.notnull(rk):
-                            if (s_int == 2017 and rk <= 4) or (s_int > 2017 and rk <= 6): apps += 1
-                            if s_int >= 2018 and rk <= 2: byes += 1
-            pg = games[(games['Team_Name'] == t) & (games['Game_Type'] == 2)]
-            r_str = pg['Playoff_Round'].astype(str).str.strip().str.lower()
-            qf, sf, f = pg[r_str.str.contains('quarter')], pg[r_str.str.contains('semi')], pg[r_str.str.contains('final|champ') & ~r_str.str.contains('quarter|semi')]
-            po_rows.append({
-                'Team': t,
-                'Appearances': apps,
-                'Byes': byes,
-                'Total_W': int(qf['W'].sum() + sf['W'].sum() + f['W'].sum()),
-                'Total_L': int(qf['L'].sum() + sf['L'].sum() + f['L'].sum()),
-                'QF_W': int(qf['W'].sum()),
-                'QF_L': int(qf['L'].sum()),
-                'SF_W': int(sf['W'].sum()),
-                'SF_L': int(sf['L'].sum()),
-                'F_W': int(f['W'].sum()),
-                'F_L': int(f['L'].sum())
-            })
-        df_po = pd.DataFrame(po_rows).sort_values(['Appearances', 'Total_W', 'Byes'], ascending=[False, False, False])
-        po_html = '<table style="width: 100%; border-collapse: collapse; text-align: center;"><thead><tr><th rowspan="2" style="border: 1px solid #e6e6e6;">Team</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Playoff Appearances</th><th rowspan="2" style="border: 1px solid #e6e6e6;">Byes</th><th colspan="2" style="border: 1px solid #e6e6e6;">Total Postseason</th><th colspan="2" style="border: 1px solid #e6e6e6;">Quarterfinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Semifinals</th><th colspan="2" style="border: 1px solid #e6e6e6;">Finals</th></tr><tr><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th><th style="border: 1px solid #e6e6e6;">W</th><th style="border: 1px solid #e6e6e6;">L</th></tr></thead><tbody>' + "".join([f'<tr><td style="border: 1px solid #e6e6e6;">{r["Team"]}</td><td style="border: 1px solid #e6e6e6;">{r["Appearances"]}</td><td style="border: 1px solid #e6e6e6;">{r["Byes"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["Total_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["QF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["SF_L"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_W"]}</td><td style="border: 1px solid #e6e6e6;">{r["F_L"]}</td></tr>' for _, r in df_po.iterrows()]) + '</tbody></table>'
-        st.markdown(po_html, unsafe_allow_html=True)
 
     elif rec_type == "Longest Head-to-Head Streaks":
         st.write("### Longest Head-to-Head Streaks")
@@ -3772,289 +4007,355 @@ elif active_tab == "Records":
 
 # ================= TAB: PLAYOFF BRACKETS =================
 elif active_tab == "Playoffs":
-    c_po1, c_po2 = st.columns([1.5, 3.5])
-    with c_po1:
-        po_szn = st.selectbox("Select Season", seasons_list, key="po_bracket_szn")
-    szn_clean = str(po_szn).replace('.0', '').strip()
+    po_view_mode = st.radio(
+        "Playoffs View:",
+        ["Playoff Brackets", "All-Time Playoff Record by Team"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="po_tab_view_mode"
+    )
+    st.write("---")
 
-    # Compute Regular Season seeds for this season
-    reg_s = games[(games['Season'] == szn_clean) & (games['Game_Type'] == 1)].copy()
-    seed_map = {}
-    rec_map = {}
-    stnd_po = pd.DataFrame()
-    if not reg_s.empty:
-        stnd_po = reg_s.groupby('Team_Name').agg(
-            W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')
-        ).reset_index()
-        stnd_po['GP'] = stnd_po['W'] + stnd_po['L'] + stnd_po['T']
-        stnd_po['WP'] = (stnd_po['W'] / stnd_po['GP']).fillna(0.0)
-        stnd_po = stnd_po.sort_values(['WP', 'PF'], ascending=[False, False]).reset_index(drop=True)
-        for idx_s, r_s in stnd_po.iterrows():
-            tm_n = str(r_s['Team_Name']).strip()
-            seed_map[tm_n] = idx_s + 1
-            rec_map[tm_n] = f"{int(r_s['W'])}-{int(r_s['L'])}" + (f"-{int(r_s['T'])}" if r_s['T'] > 0 else "")
+    if po_view_mode == "Playoff Brackets":
+        c_po1, c_po2 = st.columns([1.5, 3.5])
+        with c_po1:
+            po_szn = st.selectbox("Select Season", seasons_list, key="po_bracket_szn")
+        szn_clean = str(po_szn).replace('.0', '').strip()
 
-    # Override with official RS_Rank if available in rs_ranks_df
-    if not rs_ranks_df.empty and 'Team_Name' in rs_ranks_df.columns:
-        sub_rs = rs_ranks_df[rs_ranks_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == szn_clean]
-        for _, r_rs in sub_rs.iterrows():
-            if pd.notnull(r_rs['RS_Rank']):
-                seed_map[str(r_rs['Team_Name']).strip()] = int(float(r_rs['RS_Rank']))
+        # Compute Regular Season seeds for this season
+        reg_s = games[(games['Season'] == szn_clean) & (games['Game_Type'] == 1)].copy()
+        seed_map = {}
+        rec_map = {}
+        stnd_po = pd.DataFrame()
+        if not reg_s.empty:
+            stnd_po = reg_s.groupby('Team_Name').agg(
+                W=('W', 'sum'), L=('L', 'sum'), T=('T', 'sum'), PF=('Actual_Points', 'sum')
+            ).reset_index()
+            stnd_po['GP'] = stnd_po['W'] + stnd_po['L'] + stnd_po['T']
+            stnd_po['WP'] = (stnd_po['W'] / stnd_po['GP']).fillna(0.0)
+            stnd_po = stnd_po.sort_values(['WP', 'PF'], ascending=[False, False]).reset_index(drop=True)
+            for idx_s, r_s in stnd_po.iterrows():
+                tm_n = str(r_s['Team_Name']).strip()
+                seed_map[tm_n] = idx_s + 1
+                rec_map[tm_n] = f"{int(r_s['W'])}-{int(r_s['L'])}" + (f"-{int(r_s['T'])}" if r_s['T'] > 0 else "")
 
-    po_games = games[(games['Season'] == szn_clean) & (games['Game_Type'] == 2)].copy()
-    cons_games = games[(games['Season'] == szn_clean) & (games['Game_Type'] == 3)].copy()
+        # Override with official RS_Rank if available in rs_ranks_df
+        if not rs_ranks_df.empty and 'Team_Name' in rs_ranks_df.columns:
+            sub_rs = rs_ranks_df[rs_ranks_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip() == szn_clean]
+            for _, r_rs in sub_rs.iterrows():
+                if pd.notnull(r_rs['RS_Rank']):
+                    seed_map[str(r_rs['Team_Name']).strip()] = int(float(r_rs['RS_Rank']))
 
-    bracket_css = '''
-    <style>
-    .dffl-brk-grid {
-        display: flex;
-        flex-direction: row;
-        gap: 28px;
-        align-items: stretch;
-        justify-content: flex-start;
-        overflow-x: auto;
-        padding: 12px 4px 20px 4px;
-    }
-    .dffl-brk-col {
-        min-width: 265px;
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-around;
-        gap: 16px;
-    }
-    .dffl-brk-hdr {
-        text-align: center;
-        font-size: 13px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: #334155;
-        background: #f1f5f9;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        padding: 7px 10px;
-        margin-bottom: 4px;
-    }
-    .dffl-match-card {
-        background: #ffffff;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-        overflow: hidden;
-    }
-    .dffl-match-sub {
-        font-size: 11px;
-        font-weight: 700;
-        color: #64748b;
-        background: #f8fafc;
-        padding: 4px 10px;
-        border-bottom: 1px solid #e2e8f0;
-        text-transform: uppercase;
-    }
-    .dffl-team-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 12px;
-        font-size: 14px;
-        border-bottom: 1px solid #f1f5f9;
-    }
-    .dffl-team-row:last-child {
-        border-bottom: none;
-    }
-    .dffl-team-win {
-        background-color: #f0fdf4;
-        font-weight: 700;
-        color: #0f172a;
-    }
-    .dffl-team-loss {
-        color: #64748b;
-    }
-    .dffl-seed-badge {
-        display: inline-block;
-        min-width: 22px;
-        text-align: center;
-        font-size: 11.5px;
-        font-weight: 700;
-        color: #475569;
-        background: #e2e8f0;
-        border-radius: 4px;
-        padding: 1px 5px;
-        margin-right: 7px;
-    }
-    .dffl-bye-card {
-        background: #f8fafc;
-        border: 1px dashed #94a3b8;
-        border-radius: 8px;
-        padding: 10px 12px;
-    }
-    .dffl-champ-banner {
-        background: linear-gradient(135deg, #fef9c3 0%, #fde68a 100%);
-        border: 2px solid #eab308;
-        border-radius: 10px;
-        padding: 14px 18px;
-        text-align: center;
-        margin-top: 8px;
-        box-shadow: 0 2px 6px rgba(234, 179, 8, 0.15);
-    }
-    </style>
-    '''
-    st.markdown(bracket_css, unsafe_allow_html=True)
+        po_games = games[(games['Season'] == szn_clean) & (games['Game_Type'] == 2)].copy()
+        cons_games = games[(games['Season'] == szn_clean) & (games['Game_Type'] == 3)].copy()
 
-    def _dedup_round_games(df_sub):
-        seen = set()
-        out = []
-        for _, r in df_sub.sort_values('Week_Num').iterrows():
-            t1 = str(r['Team_Name']).strip()
-            t2 = str(r['Opponent_Team_Name']).strip()
-            if not t1 or not t2 or t2.upper() == 'BYE':
-                continue
-            pk = (int(r['Week_Num']), tuple(sorted([t1, t2])))
-            if pk in seen:
-                continue
-            seen.add(pk)
-            p1 = float(r['Actual_Points'])
-            p2 = float(r['Opp_Points'])
-            s1 = seed_map.get(t1, 99)
-            s2 = seed_map.get(t2, 99)
-            # Put better (lower number) seed on top
-            if s2 < s1:
-                t1, t2 = t2, t1
-                p1, p2 = p2, p1
-                s1, s2 = s2, s1
-            out.append({
-                'wk': int(r['Week_Num']),
-                't1': t1, 'p1': p1, 's1': s1,
-                't2': t2, 'p2': p2, 's2': s2,
-                'win': t1 if p1 > p2 else (t2 if p2 > p1 else '')
-            })
-        return sorted(out, key=lambda x: min(x['s1'], x['s2']))
+        bracket_css = '''
+        <style>
+        .dffl-brk-grid {
+            display: flex;
+            flex-direction: row;
+            gap: 28px;
+            align-items: stretch;
+            justify-content: flex-start;
+            overflow-x: auto;
+            padding: 12px 4px 20px 4px;
+        }
+        .dffl-brk-col {
+            min-width: 265px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            gap: 16px;
+        }
+        .dffl-brk-hdr {
+            text-align: center;
+            font-size: 13px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #334155;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 7px 10px;
+            margin-bottom: 4px;
+        }
+        .dffl-match-card {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+            overflow: hidden;
+        }
+        .dffl-match-sub {
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            background: #f8fafc;
+            padding: 4px 10px;
+            border-bottom: 1px solid #e2e8f0;
+            text-transform: uppercase;
+        }
+        .dffl-team-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            font-size: 14px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .dffl-team-row:last-child {
+            border-bottom: none;
+        }
+        .dffl-team-win {
+            background-color: #f0fdf4;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .dffl-team-loss {
+            color: #64748b;
+        }
+        .dffl-seed-badge {
+            display: inline-block;
+            min-width: 22px;
+            text-align: center;
+            font-size: 11.5px;
+            font-weight: 700;
+            color: #475569;
+            background: #e2e8f0;
+            border-radius: 4px;
+            padding: 1px 5px;
+            margin-right: 7px;
+        }
+        .dffl-bye-card {
+            background: #f8fafc;
+            border: 1px dashed #94a3b8;
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .dffl-champ-banner {
+            background: linear-gradient(135deg, #fef9c3 0%, #fde68a 100%);
+            border: 2px solid #eab308;
+            border-radius: 10px;
+            padding: 14px 18px;
+            text-align: center;
+            margin-top: 8px;
+            box-shadow: 0 2px 6px rgba(234, 179, 8, 0.15);
+        }
+        </style>
+        '''
+        st.markdown(bracket_css, unsafe_allow_html=True)
 
-    def _render_card_html(m, subtitle=""):
-        sub_html = f'<div class="dffl-match-sub">{subtitle} &bull; Week {m["wk"]}</div>' if subtitle else f'<div class="dffl-match-sub">Week {m["wk"]}</div>'
-        c1_cls = "dffl-team-row dffl-team-win" if m['win'] == m['t1'] else "dffl-team-row dffl-team-loss"
-        c2_cls = "dffl-team-row dffl-team-win" if m['win'] == m['t2'] else "dffl-team-row dffl-team-loss"
-        s1_lbl = f'<span class="dffl-seed-badge">#{m["s1"]}</span>' if m['s1'] < 99 else ''
-        s2_lbl = f'<span class="dffl-seed-badge">#{m["s2"]}</span>' if m['s2'] < 99 else ''
-        p1_lnk = make_box_link(f"{m['p1']:.1f}", szn_clean, m['wk'], m['t1'])
-        p2_lnk = make_box_link(f"{m['p2']:.1f}", szn_clean, m['wk'], m['t2'])
-        return (
-            f'<div class="dffl-match-card">{sub_html}'
-            f'<div class="{c1_cls}"><span>{s1_lbl}{m["t1"]}</span><span>{p1_lnk}</span></div>'
-            f'<div class="{c2_cls}"><span>{s2_lbl}{m["t2"]}</span><span>{p2_lnk}</span></div>'
-            f'</div>'
-        )
+        def _dedup_round_games(df_sub):
+            seen = set()
+            out = []
+            for _, r in df_sub.sort_values('Week_Num').iterrows():
+                t1 = str(r['Team_Name']).strip()
+                t2 = str(r['Opponent_Team_Name']).strip()
+                if not t1 or not t2 or t2.upper() == 'BYE':
+                    continue
+                pk = (int(r['Week_Num']), tuple(sorted([t1, t2])))
+                if pk in seen:
+                    continue
+                seen.add(pk)
+                p1 = float(r['Actual_Points'])
+                p2 = float(r['Opp_Points'])
+                s1 = seed_map.get(t1, 99)
+                s2 = seed_map.get(t2, 99)
+                # Put better (lower number) seed on top
+                if s2 < s1:
+                    t1, t2 = t2, t1
+                    p1, p2 = p2, p1
+                    s1, s2 = s2, s1
+                out.append({
+                    'wk': int(r['Week_Num']),
+                    't1': t1, 'p1': p1, 's1': s1,
+                    't2': t2, 'p2': p2, 's2': s2,
+                    'win': t1 if p1 > p2 else (t2 if p2 > p1 else '')
+                })
+            return sorted(out, key=lambda x: min(x['s1'], x['s2']))
 
-    if not po_games.empty:
-        r_str = po_games['Playoff_Round'].astype(str).str.strip().str.lower()
-        qf_df = po_games[r_str.str.contains('quarter')]
-        sf_df = po_games[r_str.str.contains('semi')]
-        fn_df = po_games[r_str.str.contains('final|champ') & ~r_str.str.contains('quarter|semi')]
+        def _render_card_html(m, subtitle=""):
+            sub_html = f'<div class="dffl-match-sub">{subtitle} &bull; Week {m["wk"]}</div>' if subtitle else f'<div class="dffl-match-sub">Week {m["wk"]}</div>'
+            c1_cls = "dffl-team-row dffl-team-win" if m['win'] == m['t1'] else "dffl-team-row dffl-team-loss"
+            c2_cls = "dffl-team-row dffl-team-win" if m['win'] == m['t2'] else "dffl-team-row dffl-team-loss"
+            s1_lbl = f'<span class="dffl-seed-badge">#{m["s1"]}</span>' if m['s1'] < 99 else ''
+            s2_lbl = f'<span class="dffl-seed-badge">#{m["s2"]}</span>' if m['s2'] < 99 else ''
+            p1_lnk = make_box_link(f"{m['p1']:.1f}", szn_clean, m['wk'], m['t1'])
+            p2_lnk = make_box_link(f"{m['p2']:.1f}", szn_clean, m['wk'], m['t2'])
+            return (
+                f'<div class="dffl-match-card">{sub_html}'
+                f'<div class="{c1_cls}"><span>{s1_lbl}{m["t1"]}</span><span>{p1_lnk}</span></div>'
+                f'<div class="{c2_cls}"><span>{s2_lbl}{m["t2"]}</span><span>{p2_lnk}</span></div>'
+                f'</div>'
+            )
 
-        qf_list = _dedup_round_games(qf_df)
-        sf_list = _dedup_round_games(sf_df)
-        fn_list = _dedup_round_games(fn_df)
+        if not po_games.empty:
+            r_str = po_games['Playoff_Round'].astype(str).str.strip().str.lower()
+            qf_df = po_games[r_str.str.contains('quarter')]
+            sf_df = po_games[r_str.str.contains('semi')]
+            fn_df = po_games[r_str.str.contains('final|champ') & ~r_str.str.contains('quarter|semi')]
 
-        # Find #1 and #2 seed teams for First-Round Bye cards when Quarterfinals exist
-        bye_teams = sorted([tm for tm, sd in seed_map.items() if sd in (1, 2)], key=lambda x: seed_map[x])
+            qf_list = _dedup_round_games(qf_df)
+            sf_list = _dedup_round_games(sf_df)
+            fn_list = _dedup_round_games(fn_df)
 
-        st.markdown(f"### {szn_clean} Championship Playoff Bracket")
+            # Find #1 and #2 seed teams for First-Round Bye cards when Quarterfinals exist
+            bye_teams = sorted([tm for tm, sd in seed_map.items() if sd in (1, 2)], key=lambda x: seed_map[x])
 
-        cols_html = []
+            st.markdown(f"### {szn_clean} Championship Playoff Bracket")
 
-        # Column 1: Quarterfinals (if 6-team playoff era)
-        if qf_list:
-            qf_cards = []
-            if len(bye_teams) >= 1:
-                t_b1 = bye_teams[0]
-                qf_cards.append(
-                    f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>'
-                    f'<div class="dffl-team-row" style="border:none; padding: 6px 4px; font-weight:700;">'
-                    f'<span><span class="dffl-seed-badge">#1</span>{t_b1} ({rec_map.get(t_b1, "")})</span><span style="color:#16a34a;">BYE</span></div></div>'
-                )
-            for idx_q, mq in enumerate(qf_list):
-                qf_cards.append(_render_card_html(mq, f"Quarterfinal {idx_q + 1}"))
-            if len(bye_teams) >= 2:
-                t_b2 = bye_teams[1]
-                qf_cards.append(
-                    f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>'
-                    f'<div class="dffl-team-row" style="border:none; padding: 6px 4px; font-weight:700;">'
-                    f'<span><span class="dffl-seed-badge">#2</span>{t_b2} ({rec_map.get(t_b2, "")})</span><span style="color:#16a34a;">BYE</span></div></div>'
-                )
-            cols_html.append(f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Quarterfinals</div>{"".join(qf_cards)}</div>')
+            cols_html = []
 
-        # Column 2: Semifinals
-        if sf_list:
-            sf_cards = [_render_card_html(ms, f"Semifinal {idx_s + 1}") for idx_s, ms in enumerate(sf_list)]
-            cols_html.append(f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Semifinals</div>{"".join(sf_cards)}</div>')
+            # Column 1: Quarterfinals (if 6-team playoff era)
+            if qf_list:
+                qf_cards = []
+                if len(bye_teams) >= 1:
+                    t_b1 = bye_teams[0]
+                    qf_cards.append(
+                        f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>'
+                        f'<div class="dffl-team-row" style="border:none; padding: 6px 4px; font-weight:700;">'
+                        f'<span><span class="dffl-seed-badge">#1</span>{t_b1} ({rec_map.get(t_b1, "")})</span><span style="color:#16a34a;">BYE</span></div></div>'
+                    )
+                for idx_q, mq in enumerate(qf_list):
+                    qf_cards.append(_render_card_html(mq, f"Quarterfinal {idx_q + 1}"))
+                if len(bye_teams) >= 2:
+                    t_b2 = bye_teams[1]
+                    qf_cards.append(
+                        f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>'
+                        f'<div class="dffl-team-row" style="border:none; padding: 6px 4px; font-weight:700;">'
+                        f'<span><span class="dffl-seed-badge">#2</span>{t_b2} ({rec_map.get(t_b2, "")})</span><span style="color:#16a34a;">BYE</span></div></div>'
+                    )
+                cols_html.append(f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Quarterfinals</div>{"".join(qf_cards)}</div>')
 
-        # Column 3: Finals + Champion Banner
-        if fn_list:
-            fn_cards = [_render_card_html(mf, "League Championship") for mf in fn_list]
-            champ_tm = fn_list[0]['win']
-            champ_sd = seed_map.get(champ_tm, "")
-            sd_str = f" (#{champ_sd} Seed)" if champ_sd and champ_sd < 99 else ""
-            if champ_tm:
-                fn_cards.append(
-                    f'<div class="dffl-champ-banner">'
-                    f'<div style="font-size:12px; font-weight:800; color:#854d0e; text-transform:uppercase; letter-spacing:0.08em;">{szn_clean} DFFL Champion</div>'
-                    f'<div style="font-size:22px; font-weight:900; color:#111827; margin-top:4px;">🏆 {champ_tm}{sd_str}</div>'
+            # Column 2: Semifinals
+            if sf_list:
+                sf_cards = [_render_card_html(ms, f"Semifinal {idx_s + 1}") for idx_s, ms in enumerate(sf_list)]
+                cols_html.append(f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Semifinals</div>{"".join(sf_cards)}</div>')
+
+            # Column 3: Finals + Champion Banner
+            if fn_list:
+                fn_cards = [_render_card_html(mf, "League Championship") for mf in fn_list]
+                champ_tm = fn_list[0]['win']
+                champ_sd = seed_map.get(champ_tm, "")
+                sd_str = f" (#{champ_sd} Seed)" if champ_sd and champ_sd < 99 else ""
+                if champ_tm:
+                    fn_cards.append(
+                        f'<div class="dffl-champ-banner">'
+                        f'<div style="font-size:12px; font-weight:800; color:#854d0e; text-transform:uppercase; letter-spacing:0.08em;">{szn_clean} DFFL Champion</div>'
+                        f'<div style="font-size:22px; font-weight:900; color:#111827; margin-top:4px;">🏆 {champ_tm}{sd_str}</div>'
+                        f'</div>'
+                    )
+                cols_html.append(f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Championship Finals</div>{"".join(fn_cards)}</div>')
+
+            st.markdown(f'<div class="dffl-brk-grid">{"".join(cols_html)}</div>', unsafe_allow_html=True)
+
+            # Only show Last Place Game for 2026+ (no historical consolation/placement games)
+            if szn_clean.isdigit() and int(szn_clean) >= 2026 and not cons_games.empty:
+                cons_list = _dedup_round_games(cons_games)
+                lpg_played = [mc for mc in cons_list if {mc['s1'], mc['s2']} == {11, 12}]
+                if lpg_played:
+                    st.markdown("#### Last Place Bowl (#11 vs. #12)")
+                    c_cards = [_render_card_html(mc, "Last Place Game") for mc in lpg_played]
+                    st.markdown(f'<div style="max-width: 340px; margin-top: 10px;">{"".join(c_cards)}</div>', unsafe_allow_html=True)
+
+        else:
+            # Active season (e.g. 2026) where playoffs haven't started yet -> Projected Playoff Bracket
+            max_w_reg = int(reg_s['Week_Num'].max()) if not reg_s.empty else 1
+            st.markdown(f"### {szn_clean} Projected Playoff Bracket (Through Week {max_w_reg})")
+            st.caption("If the regular season ended today: Seeds `#1` and `#2` earn First-Round Byes; `#3` hosts `#6` and `#4` hosts `#5` in the Quarterfinals (Week 15). Seeds `#11` and `#12` meet in the Last Place Game.")
+
+            if len(stnd_po) >= 6:
+                s_tms = stnd_po['Team_Name'].astype(str).str.strip().tolist()
+                def _proj_row(sd_num):
+                    tm_n = s_tms[sd_num - 1]
+                    pf_v = float(stnd_po.iloc[sd_num - 1]['PF'])
+                    return f'<div class="dffl-team-row"><span><span class="dffl-seed-badge">#{sd_num}</span><b>{tm_n}</b> ({rec_map.get(tm_n, "")})</span><span style="color:#475569; font-size:12.5px;">{pf_v:.1f} PF</span></div>'
+
+                col1_html = (
+                    f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Quarterfinals (Week 15)</div>'
+                    f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>{_proj_row(1)}</div>'
+                    f'<div class="dffl-match-card"><div class="dffl-match-sub">Quarterfinal A (#4 vs #5)</div>{_proj_row(4)}{_proj_row(5)}</div>'
+                    f'<div class="dffl-match-card"><div class="dffl-match-sub">Quarterfinal B (#3 vs #6)</div>{_proj_row(3)}{_proj_row(6)}</div>'
+                    f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>{_proj_row(2)}</div>'
                     f'</div>'
                 )
-            cols_html.append(f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Championship Finals</div>{"".join(fn_cards)}</div>')
+                col2_html = (
+                    f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Semifinals (Week 16)</div>'
+                    f'<div class="dffl-match-card"><div class="dffl-match-sub">Semifinal 1</div>{_proj_row(1)}<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Winner of #4 vs #5</span><span>TBD</span></div></div>'
+                    f'<div class="dffl-match-card"><div class="dffl-match-sub">Semifinal 2</div>{_proj_row(2)}<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Winner of #3 vs #6</span><span>TBD</span></div></div>'
+                    f'</div>'
+                )
+                col3_html = (
+                    f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Championship (Week 17)</div>'
+                    f'<div class="dffl-match-card"><div class="dffl-match-sub">DFFL Finals</div>'
+                    f'<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Semifinal 1 Winner</span><span>TBD</span></div>'
+                    f'<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Semifinal 2 Winner</span><span>TBD</span></div>'
+                    f'</div></div>'
+                )
+                st.markdown(f'<div class="dffl-brk-grid">{col1_html}{col2_html}{col3_html}</div>', unsafe_allow_html=True)
 
-        st.markdown(f'<div class="dffl-brk-grid">{"".join(cols_html)}</div>', unsafe_allow_html=True)
+                if len(s_tms) >= 12:
+                    st.markdown("#### Projected Last Place Bowl (#11 vs. #12)")
+                    lpg_html = f'<div style="max-width: 340px;"><div class="dffl-match-card"><div class="dffl-match-sub">Last Place Game</div>{_proj_row(11)}{_proj_row(12)}</div></div>'
+                    st.markdown(lpg_html, unsafe_allow_html=True)
 
-        # Only show Last Place Game for 2026+ (no historical consolation/placement games)
-        if szn_clean.isdigit() and int(szn_clean) >= 2026 and not cons_games.empty:
-            cons_list = _dedup_round_games(cons_games)
-            lpg_played = [mc for mc in cons_list if {mc['s1'], mc['s2']} == {11, 12}]
-            if lpg_played:
-                st.markdown("#### Last Place Bowl (#11 vs. #12)")
-                c_cards = [_render_card_html(mc, "Last Place Game") for mc in lpg_played]
-                st.markdown(f'<div style="max-width: 340px; margin-top: 10px;">{"".join(c_cards)}</div>', unsafe_allow_html=True)
 
     else:
-        # Active season (e.g. 2026) where playoffs haven't started yet -> Projected Playoff Bracket
-        max_w_reg = int(reg_s['Week_Num'].max()) if not reg_s.empty else 1
-        st.markdown(f"### {szn_clean} Projected Playoff Bracket (Through Week {max_w_reg})")
-        st.caption("If the regular season ended today: Seeds `#1` and `#2` earn First-Round Byes; `#3` hosts `#6` and `#4` hosts `#5` in the Quarterfinals (Week 15). Seeds `#11` and `#12` meet in the Last Place Game.")
-
-        if len(stnd_po) >= 6:
-            s_tms = stnd_po['Team_Name'].astype(str).str.strip().tolist()
-            def _proj_row(sd_num):
-                tm_n = s_tms[sd_num - 1]
-                pf_v = float(stnd_po.iloc[sd_num - 1]['PF'])
-                return f'<div class="dffl-team-row"><span><span class="dffl-seed-badge">#{sd_num}</span><b>{tm_n}</b> ({rec_map.get(tm_n, "")})</span><span style="color:#475569; font-size:12.5px;">{pf_v:.1f} PF</span></div>'
-
-            col1_html = (
-                f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Quarterfinals (Week 15)</div>'
-                f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>{_proj_row(1)}</div>'
-                f'<div class="dffl-match-card"><div class="dffl-match-sub">Quarterfinal A (#4 vs #5)</div>{_proj_row(4)}{_proj_row(5)}</div>'
-                f'<div class="dffl-match-card"><div class="dffl-match-sub">Quarterfinal B (#3 vs #6)</div>{_proj_row(3)}{_proj_row(6)}</div>'
-                f'<div class="dffl-bye-card"><div class="dffl-match-sub">First-Round Bye</div>{_proj_row(2)}</div>'
-                f'</div>'
-            )
-            col2_html = (
-                f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Semifinals (Week 16)</div>'
-                f'<div class="dffl-match-card"><div class="dffl-match-sub">Semifinal 1</div>{_proj_row(1)}<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Winner of #4 vs #5</span><span>TBD</span></div></div>'
-                f'<div class="dffl-match-card"><div class="dffl-match-sub">Semifinal 2</div>{_proj_row(2)}<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Winner of #3 vs #6</span><span>TBD</span></div></div>'
-                f'</div>'
-            )
-            col3_html = (
-                f'<div class="dffl-brk-col"><div class="dffl-brk-hdr">Championship (Week 17)</div>'
-                f'<div class="dffl-match-card"><div class="dffl-match-sub">DFFL Finals</div>'
-                f'<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Semifinal 1 Winner</span><span>TBD</span></div>'
-                f'<div class="dffl-team-row" style="color:#64748b; font-style:italic;"><span>Semifinal 2 Winner</span><span>TBD</span></div>'
-                f'</div></div>'
-            )
-            st.markdown(f'<div class="dffl-brk-grid">{col1_html}{col2_html}{col3_html}</div>', unsafe_allow_html=True)
-
-            if len(s_tms) >= 12:
-                st.markdown("#### Projected Last Place Bowl (#11 vs. #12)")
-                lpg_html = f'<div style="max-width: 340px;"><div class="dffl-match-card"><div class="dffl-match-sub">Last Place Game</div>{_proj_row(11)}{_proj_row(12)}</div></div>'
-                st.markdown(lpg_html, unsafe_allow_html=True)
+        st.markdown("### All-Time Playoff Record by Team")
+        po_teams_clean = [t for t in teams if str(t).strip().upper() != "CAM"]
+        po_rows = []
+        for t in po_teams_clean:
+            apps, byes = 0, 0
+            if not rs_ranks_df.empty and "Team_Name" in rs_ranks_df.columns:
+                for _, r in rs_ranks_df[rs_ranks_df["Team_Name"] == t].iterrows():
+                    szn = str(r["Season"]).strip()
+                    if szn.isdigit() and szn in completed_playoff_seasons:
+                        s_int, rk = int(szn), float(r["RS_Rank"])
+                        if pd.notnull(rk):
+                            if (s_int == 2017 and rk <= 4) or (s_int > 2017 and rk <= 6): apps += 1
+                            if s_int >= 2018 and rk <= 2: byes += 1
+            pg = games[(games["Team_Name"] == t) & (games["Game_Type"] == 2)]
+            r_str = pg["Playoff_Round"].astype(str).str.strip().str.lower()
+            qf, sf, f_gm = pg[r_str.str.contains("quarter")], pg[r_str.str.contains("semi")], pg[r_str.str.contains("final|champ") & ~r_str.str.contains("quarter|semi")]
+            po_rows.append({
+                "Team": t,
+                "Appearances": apps,
+                "Byes": byes,
+                "Total_W": int(qf["W"].sum() + sf["W"].sum() + f_gm["W"].sum()),
+                "Total_L": int(qf["L"].sum() + sf["L"].sum() + f_gm["L"].sum()),
+                "QF_W": int(qf["W"].sum()), "QF_L": int(qf["L"].sum()),
+                "SF_W": int(sf["W"].sum()), "SF_L": int(sf["L"].sum()),
+                "F_W": int(f_gm["W"].sum()), "F_L": int(f_gm["L"].sum())
+            })
+        df_po = pd.DataFrame(po_rows).sort_values(["F_W", "Appearances", "Total_W", "Byes"], ascending=[False, False, False, False])
+        po_html = (
+            '<table style="width: 100%; border-collapse: collapse; text-align: center;"><thead>'
+            '<tr><th rowspan="2" style="border: 1px solid #cbd5e1; background:#f8fafc; padding:8px;">Team</th>'
+            '<th rowspan="2" style="border: 1px solid #cbd5e1; background:#f8fafc; padding:8px;">Playoff Appearances</th>'
+            '<th rowspan="2" style="border: 1px solid #cbd5e1; background:#f8fafc; padding:8px;">Byes</th>'
+            '<th colspan="2" style="border: 1px solid #cbd5e1; background:#f8fafc; padding:8px;">Total Postseason</th>'
+            '<th colspan="2" style="border: 1px solid #cbd5e1; background:#f8fafc; padding:8px;">Quarterfinals</th>'
+            '<th colspan="2" style="border: 1px solid #cbd5e1; background:#f8fafc; padding:8px;">Semifinals</th>'
+            '<th colspan="2" style="border: 1px solid #cbd5e1; background:#f8fafc; padding:8px;">Finals</th></tr>'
+            '<tr><th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">W</th><th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">L</th>'
+            '<th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">W</th><th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">L</th>'
+            '<th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">W</th><th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">L</th>'
+            '<th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">W</th><th style="border: 1px solid #cbd5e1; background:#f8fafc; padding:6px;">L</th></tr></thead><tbody>'
+            + "".join([
+                f'<tr><td style="border: 1px solid #e2e8f0; padding:7px; font-weight:600;">{r["Team"]}</td>'
+                f'<td style="border: 1px solid #e2e8f0; padding:7px;">{r["Appearances"]}</td>'
+                f'<td style="border: 1px solid #e2e8f0; padding:7px;">{r["Byes"]}</td>'
+                f'<td style="border: 1px solid #e2e8f0; padding:7px;">{r["Total_W"]}</td><td style="border: 1px solid #e2e8f0; padding:7px;">{r["Total_L"]}</td>'
+                f'<td style="border: 1px solid #e2e8f0; padding:7px;">{r["QF_W"]}</td><td style="border: 1px solid #e2e8f0; padding:7px;">{r["QF_L"]}</td>'
+                f'<td style="border: 1px solid #e2e8f0; padding:7px;">{r["SF_W"]}</td><td style="border: 1px solid #e2e8f0; padding:7px;">{r["SF_L"]}</td>'
+                f'<td style="border: 1px solid #e2e8f0; padding:7px; font-weight:700;">{r["F_W"]}</td><td style="border: 1px solid #e2e8f0; padding:7px;">{r["F_L"]}</td></tr>'
+                for _, r in df_po.iterrows()
+            ])
+            + "</tbody></table>"
+        )
+        st.markdown(po_html, unsafe_allow_html=True)
 
 # ================= TAB 8: DRAFT =================
 elif active_tab == "Draft":
