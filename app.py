@@ -217,6 +217,11 @@ def _file_mtime(path):
 # ================= DATA LOADERS =================
 @st.cache_data(show_spinner=False)
 def load_box_scores(_mtime_main=0.0):
+    if os.environ.get("DFFL_REBUILD_CACHE") != "1" and os.path.exists("cloud_cache_Box_Scores.pkl"):
+        try:
+            return pd.read_pickle("cloud_cache_Box_Scores.pkl")
+        except Exception:
+            pass
     dfs = []
     try:
         df_main = pd.read_excel("espn_fantasy_complete_stats_2017_2026.xlsx", sheet_name="Box_Scores", engine="openpyxl")
@@ -1988,8 +1993,7 @@ active_tab = st.radio("Navigation", NAV_TABS, horizontal=True, label_visibility=
 
 # ================= TAB 0: HOME =================
 if active_tab == "Home":
-    import importlib, odds_engine
-    importlib.reload(odds_engine)
+    import odds_engine
 
     cur_szn = seasons_list[0] if seasons_list else "2026"
     szn_clean = str(cur_szn).replace('.0', '').strip()
@@ -2660,42 +2664,52 @@ elif active_tab == "Matchups":
             found_trades = False
             try:
                 import value_engine
-                m_df = value_engine.build_Master_df(box_df)
-                if not m_df.empty:
-                    tr_sub = m_df[
-                        (m_df['Transaction_Type'] == 'Trade') &
-                        (
-                            ((m_df['Manager'] == team_a) & (m_df['Trade_Partner'] == team_b)) |
-                            ((m_df['Manager'] == team_b) & (m_df['Trade_Partner'] == team_a))
-                        )
+                _, trades_all = transactions_tab.load_transactions_data(box_df)
+                tva_all = value_engine.compute_trade_value_added(trades_all, box_df)
+                base_tr = tva_all if not tva_all.empty else trades_all
+                if not base_tr.empty:
+                    mgr_a = value_engine.map_team_to_mgr(team_a)
+                    mgr_b = value_engine.map_team_to_mgr(team_b)
+                    m1_norm = base_tr['Manager 1'].apply(value_engine.map_team_to_mgr)
+                    m2_norm = base_tr['Manager 2'].apply(value_engine.map_team_to_mgr)
+                    tr_sub = base_tr[
+                        ((m1_norm == mgr_a) & (m2_norm == mgr_b)) |
+                        ((m1_norm == mgr_b) & (m2_norm == mgr_a))
                     ].copy()
                     if not tr_sub.empty:
                         found_trades = True
                         trade_cards = []
-                        for tid, grp in tr_sub.groupby('Trade_Group_ID'):
-                            szn_val = int(grp['Season'].iloc[0])
-                            dt_val = str(grp['Date'].iloc[0])[:10]
-                            a_got = grp[grp['Manager'] == team_a]
-                            b_got = grp[grp['Manager'] == team_b]
-                            a_str = ", ".join([f"{r['Player_Name']} ({r['Net_Pts_Rest_Of_Season']:.1f} ROS pts)" for _, r in a_got.iterrows()]) or "-"
-                            b_str = ", ".join([f"{r['Player_Name']} ({r['Net_Pts_Rest_Of_Season']:.1f} ROS pts)" for _, r in b_got.iterrows()]) or "-"
-                            a_tot = a_got['Net_Pts_Rest_Of_Season'].sum()
-                            b_tot = b_got['Net_Pts_Rest_Of_Season'].sum()
-                            win_mgr = team_a if a_tot > b_tot else (team_b if b_tot > a_tot else "Even")
-                            margin_pts = abs(a_tot - b_tot)
-                            trade_cards.append({
-                                'Season': szn_val,
-                                'Date': dt_val,
-                                f'{team_a} Received': a_str,
-                                f'{team_b} Received': b_str,
-                                'Trade Winner (Net ROS)': f"{win_mgr} (+{margin_pts:.1f})" if win_mgr != "Even" else "Even"
-                            })
-                        t_disp_df = pd.DataFrame(trade_cards).sort_values(['Season', 'Date'], ascending=[False, False])
-                        render_html_table(t_disp_df, left_align_cols=[f'{team_a} Received', f'{team_b} Received'])
-            except Exception:
-                pass
+                        has_tva = 'M1_Val' in tr_sub.columns
+                        for _, r in tr_sub.sort_values(['Season', 'Week'], ascending=[False, False]).iterrows():
+                            r_m1 = value_engine.map_team_to_mgr(r['Manager 1'])
+                            if r_m1 == mgr_a:
+                                a_rec, b_rec = r['Manager 1 Receives'], r['Manager 2 Receives']
+                                a_val, b_val = (r['M1_Val'], r['M2_Val']) if has_tva else (None, None)
+                            else:
+                                a_rec, b_rec = r['Manager 2 Receives'], r['Manager 1 Receives']
+                                a_val, b_val = (r['M2_Val'], r['M1_Val']) if has_tva else (None, None)
+                            row_d = {
+                                'Season': int(r['Season']),
+                                'Week': int(r['Week']),
+                                f'{team_a} Received': a_rec,
+                                f'{team_b} Received': b_rec,
+                            }
+                            if has_tva:
+                                row_d[f'{team_a} Value'] = transactions_tab.fmt_signed(a_val)
+                                row_d[f'{team_b} Value'] = transactions_tab.fmt_signed(b_val)
+                                row_d['Trade Winner (TVA)'] = r['Trade Winner']
+                            trade_cards.append(row_d)
+                        t_disp_df = pd.DataFrame(trade_cards)
+                        cols_ord = ['Season', 'Week', f'{team_a} Received']
+                        if has_tva:
+                            cols_ord += [f'{team_a} Value', f'{team_b} Received', f'{team_b} Value', 'Trade Winner (TVA)']
+                        else:
+                            cols_ord += [f'{team_b} Received']
+                        transactions_tab.render_table(t_disp_df[cols_ord], left_align_cols=[f'{team_a} Received', f'{team_b} Received'])
+            except Exception as e:
+                st.error(f"Could not load trade history: {e}")
             if not found_trades:
-                st.info(f"No trades on record between {team_a} and {team_b} (2017-2026).")
+                st.info(f"No trades on record between {team_a} and {team_b} (2018-2026).")
     else:
         st.write("No matchups found between these teams.")
 
@@ -2814,8 +2828,7 @@ elif active_tab == "Standings":
                 render_html_table(stnd[cols_disp].rename(columns={'Team_Name': 'Team'}), highlight_fn=hl_stnd)
 
         if stnd_tab_mode in ["Standings & Playoff Odds", "Playoff Odds & Moneylines Only"]:
-            import importlib, odds_engine
-            importlib.reload(odds_engine)
+            import odds_engine
 
             st.markdown(f"### Playoff Odds & Moneyline Board (Through Week {sel_wk})")
             szn_records = szn_data[['Week_Num', 'Team_Name', 'Opponent_Team_Name', 'Actual_Points', 'Opp_Points', 'W', 'L', 'T']].to_dict('records')
@@ -4049,9 +4062,7 @@ elif active_tab == "Draft":
 
 # ================= TAB 9: TRANSACTIONS =================
 elif active_tab == "Transactions":
-    import importlib, value_engine
-    importlib.reload(value_engine)
-    importlib.reload(transactions_tab)
+    # Cached modules loaded cleanly without importlib.reload memory churn
     transactions_tab.render(box_df)
 
 # ================= TAB 10: PLAYERS =================

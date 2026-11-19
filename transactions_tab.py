@@ -132,8 +132,17 @@ def clean_2018_rows(df):
     return df.apply(fix_row, axis=1)
 
 @st.cache_data(show_spinner=False)
-def load_transactions_data(_box_df=None, _v=2):
+def load_transactions_data(_box_df=None, _v=3):
     import os
+    if (
+        os.environ.get("DFFL_REBUILD_CACHE") != "1"
+        and os.path.exists("cloud_cache_Transactions_Clean.pkl")
+        and os.path.exists("cloud_cache_Trades.pkl")
+    ):
+        try:
+            return pd.read_pickle("cloud_cache_Transactions_Clean.pkl"), pd.read_pickle("cloud_cache_Trades.pkl")
+        except Exception:
+            pass
     box_df = _box_df
     dfs = []
     if os.path.exists("cloud_cache_Transactions.pkl"):
@@ -288,6 +297,7 @@ def render(box_df=None):
 
     wva_df = value_engine.compute_waiver_value_added(df, box_df)
     tva_df = value_engine.compute_trade_value_added(trades_df, box_df)
+    drops_regret_df = value_engine.compute_drop_regret(df, box_df)
 
     tx_view = st.radio(
         "Transactions View:",
@@ -295,12 +305,13 @@ def render(box_df=None):
             "Manager Activity Leaderboard",
             "Waiver Value Added (WVA)",
             "Trade History & Value Added (TVA)",
+            "Worst Drops (Drop Regret)",
             "Most Added & Dropped Players",
             "FAAB & Waiver Wire Battles",
             "Full Transaction Search"
         ],
         horizontal=True,
-        key="tx_sub_view_v4"
+        key="tx_sub_view_v5"
     )
     st.write("---")
 
@@ -517,6 +528,79 @@ def render(box_df=None):
                 tm_df = pd.DataFrame(tm_rows).sort_values('TVA_Num', ascending=False).reset_index(drop=True)
                 tm_df['Rank'] = tm_df.index + 1
                 render_table(tm_df[['Rank', 'Manager', 'Trades', 'Trade Record (W-L)', 'Net Trade Value Added', 'Avg TVA / Trade']])
+
+    # ================= VIEW 3B: WORST DROPS (DROP REGRET) =================
+    elif tx_view == "Worst Drops (Drop Regret)":
+        st.caption(
+            "**Drop Regret** measures starter points above positional replacement generated for rival managers after a player was dropped "
+            "(tracking post-drop starts until the end of the season or re-acquisition by the original manager)."
+        )
+        if drops_regret_df.empty:
+            st.info("No post-drop rival starter data available.")
+            return
+
+        dr_mode = st.radio(
+            "Select Drop Regret View:",
+            ["Biggest Premature Cuts (Top Drop Regret)", "Manager Drop Regret Leaderboard"],
+            horizontal=True,
+            key="dr_mode_sel"
+        )
+
+        c1, c2, c3 = st.columns(3)
+        sel_szn = c1.selectbox("Season:", [all_time_lbl] + [str(s) for s in seasons_avail], key="dr_szn")
+        sel_pos = c2.selectbox("Position:", ["Skill Players (QB/RB/WR/TE)", "All Positions", "QB", "RB", "WR", "TE", "D/ST", "K"], key="dr_pos")
+        sel_mgr = c3.selectbox("Dropped By:", ["All Managers"] + managers_list, key="dr_mgr")
+
+        sub_dr = drops_regret_df.copy()
+        if not sel_szn.startswith("All-Time"):
+            sub_dr = sub_dr[sub_dr['Season'] == int(sel_szn)]
+        if sel_pos == "Skill Players (QB/RB/WR/TE)":
+            sub_dr = sub_dr[~sub_dr['Pos'].isin(['D/ST', 'K'])]
+        elif sel_pos != "All Positions":
+            sub_dr = sub_dr[sub_dr['Pos'] == sel_pos]
+        if sel_mgr != "All Managers":
+            sub_dr = sub_dr[sub_dr['Dropped_By'] == sel_mgr]
+
+        if sub_dr.empty:
+            st.info("No regrettable drops match the selected filters.")
+        elif dr_mode == "Biggest Premature Cuts (Top Drop Regret)":
+            ranked = sub_dr.sort_values('Drop_Regret', ascending=False).head(30).reset_index(drop=True)
+            ranked['Rank'] = ranked.index + 1
+            ranked['Pts / Start'] = ranked['Pts_Per_Start'].apply(lambda x: f"{float(x):.1f}")
+            ranked['Regret Str'] = ranked['Drop_Regret'].apply(lambda x: f"+{float(x):.1f}")
+            disp = ranked[[
+                'Rank', 'Season', 'Drop_Week', 'Dropped_By', 'Player', 'Pos',
+                'Scooped_By', 'Rival_Starts', 'Pts / Start', 'Pos_Rank', 'Szn_Pos_Rank', 'Regret Str'
+            ]].rename(columns={
+                'Drop_Week': 'Drop Wk', 'Dropped_By': 'Dropped By', 'Scooped_By': 'Scooped By',
+                'Rival_Starts': 'Rival Starts', 'Pos_Rank': 'Avg Wk Rank', 'Szn_Pos_Rank': 'Szn Finish',
+                'Regret Str': 'Drop Regret'
+            })
+            render_table(disp, left_align_cols=['Player', 'Scooped By'])
+        else:
+            m_rows = []
+            for mgr in managers_list:
+                m_sub = sub_dr[sub_dr['Dropped_By'] == mgr]
+                if m_sub.empty:
+                    continue
+                tot_reg = float(m_sub['Drop_Regret'].sum())
+                starts_gifted = int(m_sub['Rival_Starts'].sum())
+                worst_r = m_sub.loc[m_sub['Drop_Regret'].idxmax()]
+                m_rows.append({
+                    'Manager': mgr,
+                    'Regrettable Cuts': len(m_sub),
+                    'Rival Starts Gifted': starts_gifted,
+                    'Regret_Num': tot_reg,
+                    'Total Drop Regret': f"+{tot_reg:.1f}",
+                    'Worst Cut': f"{worst_r['Player']} ({int(worst_r['Season'])} W{int(worst_r['Drop_Week'])}, +{float(worst_r['Drop_Regret']):.1f} to {worst_r['Scooped_By']})"
+                })
+            if m_rows:
+                m_df = pd.DataFrame(m_rows).sort_values('Regret_Num', ascending=False).reset_index(drop=True)
+                m_df['Rank'] = m_df.index + 1
+                render_table(
+                    m_df[['Rank', 'Manager', 'Regrettable Cuts', 'Rival Starts Gifted', 'Total Drop Regret', 'Worst Cut']],
+                    left_align_cols=['Worst Cut']
+                )
 
     # ================= VIEW 4: MOST ADDED & DROPPED PLAYERS =================
     elif tx_view == "Most Added & Dropped Players":

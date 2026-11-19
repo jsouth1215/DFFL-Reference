@@ -402,9 +402,20 @@ def main():
             shutil.rmtree(cache_dir, ignore_errors=True)
             print("Cleared _fast_cache/ binary cache.")
 
+        try:
+            import build_cloud_caches
+            print("Rebuilding cloud_cache_*.pkl files...")
+            build_cloud_caches.build_all()
+        except Exception as e:
+            print(f"  [!] Warning: build_cloud_caches failed: {e}")
+
         if args.push:
             print("Committing and pushing updates to GitHub...")
+            import glob
+            pkl_files = glob.glob("cloud_cache_*.pkl")
             subprocess.run(["git", "add", STATS_FILE, TX_FILE], check=False)
+            if pkl_files:
+                subprocess.run(["git", "add", "-f"] + pkl_files, check=False)
             status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
             if status.stdout.strip():
                 wks_str = ", ".join(str(w) for w in sorted(set(weeks_to_sync)))

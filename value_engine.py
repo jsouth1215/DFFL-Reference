@@ -1,3 +1,4 @@
+import os
 import re
 import streamlit as st
 import pandas as pd
@@ -385,7 +386,12 @@ def compute_draft_value_added(_draft_df, _box_df, _trades_df=None, _v=4):
     return d
 
 @st.cache_data(show_spinner=False)
-def compute_waiver_value_added(_tx_df, _box_df, _v=4):
+def compute_waiver_value_added(_tx_df, _box_df, _v=5):
+    if os.environ.get("DFFL_REBUILD_CACHE") != "1" and os.path.exists("cloud_cache_WVA.pkl"):
+        try:
+            return pd.read_pickle("cloud_cache_WVA.pkl")
+        except Exception:
+            pass
     tx_df, box_df = _tx_df, _box_df
     b = normalize_box_df(box_df)
     if b.empty or tx_df is None or tx_df.empty:
@@ -468,7 +474,12 @@ def compute_waiver_value_added(_tx_df, _box_df, _v=4):
     return pd.DataFrame(rows)
 
 @st.cache_data(show_spinner=False)
-def compute_trade_value_added(_trades_df, _box_df, _v=4):
+def compute_trade_value_added(_trades_df, _box_df, _v=5):
+    if os.environ.get("DFFL_REBUILD_CACHE") != "1" and os.path.exists("cloud_cache_TVA.pkl"):
+        try:
+            return pd.read_pickle("cloud_cache_TVA.pkl")
+        except Exception:
+            pass
     trades_df, box_df = _trades_df, _box_df
     b = normalize_box_df(box_df)
     if b.empty or trades_df is None or trades_df.empty:
@@ -568,3 +579,120 @@ def compute_trade_value_added(_trades_df, _box_df, _v=4):
 
     return pd.DataFrame(rows)
     
+
+
+@st.cache_data(show_spinner=False)
+def compute_drop_regret(_tx_df, _box_df, _v=1):
+    if os.environ.get("DFFL_REBUILD_CACHE") != "1" and os.path.exists("cloud_cache_Drops.pkl"):
+        try:
+            return pd.read_pickle("cloud_cache_Drops.pkl")
+        except Exception:
+            pass
+    tx_df, box_df = _tx_df, _box_df
+    b = normalize_box_df(box_df)
+    if b.empty or tx_df is None or tx_df.empty:
+        return pd.DataFrame()
+    b, _ = compute_weekly_scores(b)
+
+    drops = tx_df[
+        (tx_df['Status'] == 'EXECUTED') &
+        (tx_df['Action'] == 'DROP') &
+        (~tx_df['Type'].isin(['TRADE_ACCEPT', 'TRADE']))
+    ].copy()
+    if drops.empty:
+        return pd.DataFrame()
+    drops['Player'] = drops['Player'].apply(normalize_player_name)
+    drops['Dropper'] = drops['From_Team'].apply(map_team_to_mgr)
+    drops = drops[(drops['Dropper'] != '') & (drops['Dropper'] != 'Free Agency / Waivers')].copy()
+
+    adds = tx_df[
+        (tx_df['Status'] == 'EXECUTED') &
+        (tx_df['Action'] == 'ADD') &
+        (tx_df['Type'].isin(['WAIVER', 'FREEAGENT']))
+    ].copy()
+    adds['Player'] = adds['Player'].apply(normalize_player_name)
+    adds['Adder'] = adds['To_Team'].apply(map_team_to_mgr)
+
+    # Index executed adds by (Season, Player) for re-acquisition caps and pickup week labels
+    add_idx = {}
+    for (szn, pl), grp in adds.groupby(['Season', 'Player']):
+        add_idx[(int(szn), str(pl))] = grp.sort_values('Week')[['Week', 'Adder', 'Type', 'Bid_Amount']].to_dict('records')
+
+    # Full-season positional finish lookup
+    b_dedup = b.sort_values('Is_Start', ascending=False).drop_duplicates(subset=['Szn', 'Wk', 'Pl'])
+    szn_pos_rk = b_dedup.groupby(['Szn', 'Pos', 'Pl'])['Pts'].sum().reset_index()
+    szn_pos_rk['Rk'] = szn_pos_rk.groupby(['Szn', 'Pos'])['Pts'].rank(ascending=False, method='min').astype(int)
+    pos_rk_map = {(int(r['Szn']), str(r['Pl'])): f"{r['Pos']}{int(r['Rk'])}" for _, r in szn_pos_rk[szn_pos_rk['Pts'] > 0].iterrows()}
+
+    # Index box scores by (Season, Player)
+    b_pl_idx = {k: grp.sort_values('Wk') for k, grp in b.groupby(['Szn', 'Pl'])}
+
+    best_by_key = {}
+    for _, r in drops.sort_values(['Season', 'Week']).iterrows():
+        szn = int(r['Season'])
+        wk_drop = int(r['Week'])
+        dropper = str(r['Dropper']).strip()
+        pl = str(r['Player']).strip()
+        pos = str(r['Position']).strip()
+
+        p_logs = b_pl_idx.get((szn, pl))
+        if p_logs is None or p_logs.empty:
+            continue
+
+        # If dropper still had the player on their box score in wk_drop, rival stints begin wk_drop + 1
+        on_dropper_same_wk = not p_logs[(p_logs['Wk'] == wk_drop) & (p_logs['Mgr'] == dropper)].empty
+        start_wk = wk_drop + 1 if on_dropper_same_wk else max(1, wk_drop)
+
+        # Cap at dropper re-acquisition week if dropper later picked them back up
+        p_adds = add_idx.get((szn, pl), [])
+        re_adds = [a['Week'] for a in p_adds if a['Adder'] == dropper and a['Week'] > wk_drop]
+        end_wk = (min(re_adds) - 1) if re_adds else 99
+
+        rival_logs = p_logs[(p_logs['Wk'] >= start_wk) & (p_logs['Wk'] <= end_wk) & (p_logs['Mgr'] != dropper)]
+        rival_starts_df = rival_logs[rival_logs['Is_Start']]
+        if rival_starts_df.empty:
+            continue
+
+        rival_starts = int(len(rival_starts_df))
+        rival_pts = float(rival_starts_df['Pts'].sum())
+        rival_pps = rival_pts / rival_starts if rival_starts > 0 else 0.0
+        # Starter value above replacement gifted to rival managers
+        regret_val = float(rival_starts_df['Wk_Val'].sum())
+        if regret_val <= 0:
+            continue
+
+        avg_wk_rk = int(round(rival_starts_df['Wk_Pos_Rk'].mean()))
+        pos_rk_str = f"{pos}{avg_wk_rk}" if pos else pos_rk_map.get((szn, pl), '-')
+
+        # Identify who scooped them up (prefer rival managers who actually started them, annotated with first pickup week)
+        rival_mgrs = rival_starts_df['Mgr'].value_counts().index.tolist()
+        scoop_parts = []
+        for rm in rival_mgrs:
+            rm_adds = [a['Week'] for a in p_adds if a['Adder'] == rm and a['Week'] >= wk_drop and a['Week'] <= end_wk]
+            if rm_adds:
+                scoop_parts.append(f"{rm} (W{min(rm_adds)})")
+            else:
+                scoop_parts.append(rm)
+        scooped_by = ", ".join(scoop_parts)
+
+        rec = {
+            'Season': szn,
+            'Drop_Week': wk_drop,
+            'Dropped_By': dropper,
+            'Player': pl,
+            'Pos': pos,
+            'Scooped_By': scooped_by,
+            'Rival_Starts': rival_starts,
+            'Rival_Pts': round(rival_pts, 1),
+            'Pts_Per_Start': round(rival_pps, 1),
+            'Pos_Rank': pos_rk_str,
+            'Szn_Pos_Rank': pos_rk_map.get((szn, pl), '-'),
+            'Drop_Regret': round(regret_val, 2)
+        }
+        key = (szn, dropper, pl)
+        if key not in best_by_key or rec['Drop_Regret'] > best_by_key[key]['Drop_Regret']:
+            best_by_key[key] = rec
+
+    if not best_by_key:
+        return pd.DataFrame()
+    return pd.DataFrame(list(best_by_key.values())).sort_values('Drop_Regret', ascending=False).reset_index(drop=True)
