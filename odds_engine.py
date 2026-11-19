@@ -435,10 +435,16 @@ def run_playoff_odds_simulation(
                 "Team_1_Current_ML": prob_to_moneyline(po_probs[i1], clinched_playoffs[i1], elim_playoffs[i1]),
                 "Team_1_Win_ML": "CLINCHED" if clinched_playoffs[i1] else ("ELIM" if elim_playoffs[i1] else prob_to_moneyline(p_t1_win, p_t1_win >= 0.9999 and clinched_playoffs[i1], False)),
                 "Team_1_Loss_ML": "CLINCHED" if clinched_playoffs[i1] else ("ELIM" if elim_playoffs[i1] else prob_to_moneyline(p_t1_loss, False, p_t1_loss <= 0.0001 and elim_playoffs[i1])),
+                "Team_1_Win_Prob": float(p_t1_win),
+                "Team_1_Loss_Prob": float(p_t1_loss),
+                "Team_1_Swing_Pct": 0.0 if (clinched_playoffs[i1] or elim_playoffs[i1]) else max(0.0, (p_t1_win - p_t1_loss) * 100.0),
                 "Team_2": t2_name,
                 "Team_2_Current_ML": prob_to_moneyline(po_probs[i2], clinched_playoffs[i2], elim_playoffs[i2]),
                 "Team_2_Win_ML": "CLINCHED" if clinched_playoffs[i2] else ("ELIM" if elim_playoffs[i2] else prob_to_moneyline(p_t2_win, p_t2_win >= 0.9999 and clinched_playoffs[i2], False)),
                 "Team_2_Loss_ML": "CLINCHED" if clinched_playoffs[i2] else ("ELIM" if elim_playoffs[i2] else prob_to_moneyline(p_t2_loss, False, p_t2_loss <= 0.0001 and elim_playoffs[i2])),
+                "Team_2_Win_Prob": float(p_t2_win),
+                "Team_2_Loss_Prob": float(p_t2_loss),
+                "Team_2_Swing_Pct": 0.0 if (clinched_playoffs[i2] or elim_playoffs[i2]) else max(0.0, (p_t2_win - p_t2_loss) * 100.0),
             })
 
     rows = []

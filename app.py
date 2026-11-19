@@ -2108,23 +2108,45 @@ if active_tab == "Home":
             if next_wk_lev:
                 n_wk_num = next_wk_lev[0]['Week']
                 st.markdown(f"### Week {n_wk_num} Matchups & Playoff Leverage")
-                rec_lookup = dict(zip(stnd_h['Team_Name'], stnd_h.apply(lambda r: f"{int(r['W'])}-{int(r['L'])}", axis=1)))
+
+                def _ml_to_prob_fallback(ml_str):
+                    s = str(ml_str).strip()
+                    if s == "CLINCHED": return 1.0
+                    if s == "ELIM": return 0.0
+                    try:
+                        v = float(s.replace("+", ""))
+                        return (-v / (-v + 100.0)) if v < 0 else (100.0 / (v + 100.0))
+                    except Exception:
+                        return 0.0
+
+                def _fmt_team_swing(tm_name, win_ml, loss_ml, swing_val):
+                    s_win = str(win_ml).strip()
+                    if s_win == "CLINCHED":
+                        return f"{tm_name} Clinched", 0.0
+                    if s_win == "ELIM":
+                        return f"{tm_name} Elim", 0.0
+                    if swing_val is None:
+                        swing_val = max(0.0, (_ml_to_prob_fallback(win_ml) - _ml_to_prob_fallback(loss_ml)) * 100.0)
+                    swing_val = float(swing_val)
+                    if 0.0 < swing_val < 0.5:
+                        return f"{tm_name} +/- <1%", swing_val
+                    return f"{tm_name} +/- {swing_val:.0f}%", swing_val
+
                 nw_rows = []
                 for item in next_wk_lev:
                     t1 = item['Team_1']
                     t2 = item['Team_2']
-                    def _fmt_ml_cell(v):
-                        s = str(v).strip()
-                        return "Clinched" if s == "CLINCHED" else ("Eliminated" if s == "ELIM" else s)
+                    t1_str, s1 = _fmt_team_swing(t1, item.get('Team_1_Win_ML'), item.get('Team_1_Loss_ML'), item.get('Team_1_Swing_Pct'))
+                    t2_str, s2 = _fmt_team_swing(t2, item.get('Team_2_Win_ML'), item.get('Team_2_Loss_ML'), item.get('Team_2_Swing_Pct'))
                     nw_rows.append({
                         'Matchup': f"{t1} ({rec_lookup.get(t1, '')}) vs. {t2} ({rec_lookup.get(t2, '')})",
-                        'Team A': t1,
-                        'A (If Win / Loss)': f"{_fmt_ml_cell(item['Team_1_Win_ML'])}  /  {_fmt_ml_cell(item['Team_1_Loss_ML'])}",
-                        'Team B': t2,
-                        'B (If Win / Loss)': f"{_fmt_ml_cell(item['Team_2_Win_ML'])}  /  {_fmt_ml_cell(item['Team_2_Loss_ML'])}"
+                        'Playoff Odds Swing': f"{t1_str}  /  {t2_str}",
+                        '_tot_swing': s1 + s2
                     })
-                hl_nw = lambda r: ['font-family: monospace; font-weight: 600;' if 'If Win' in c else ('font-weight: 600;' if c == 'Matchup' else '') for c in r.index]
-                render_html_table(pd.DataFrame(nw_rows), highlight_fn=hl_nw)
+                nw_df = pd.DataFrame(nw_rows).sort_values('_tot_swing', ascending=False).drop(columns=['_tot_swing']).reset_index(drop=True)
+                hl_nw = lambda r: ['font-family: monospace; font-weight: 600;' if c == 'Playoff Odds Swing' else ('font-weight: 600;' if c == 'Matchup' else '') for c in r.index]
+                render_html_table(nw_df, highlight_fn=hl_nw)
+                st.caption("Swing shows total playoff probability difference between winning vs. losing this matchup.")
             else:
                 st.markdown("### Upcoming Matchups")
                 st.info("Regular season schedule complete.")
