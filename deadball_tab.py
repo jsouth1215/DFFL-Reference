@@ -44,7 +44,7 @@ def render_table(df, left_align_cols=None):
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
-def load_deadball_data_v7():
+def load_deadball_data_v8():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -73,7 +73,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data_v7()
+    data = load_deadball_data_v8()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
@@ -83,6 +83,7 @@ def render():
         [
             "Season Standings & Summary (2011-2014)",
             "Deadball Draft Boards (2012-2014)",
+            "2013 Season Archive (Matchups, Rosters & Lore)",
             "Team Schedules & Season Logs (2012 & 2014)",
             "Weekly Scoreboards & Box Scores (2012 & 2014)",
             "Waiver, Free Agency & Activity Logs (2012 & 2014)",
@@ -98,7 +99,7 @@ def render():
             "#### Deadball Era Champions & Shared Franchises\n"
             "* **2011 Season:** **Matt** won the inaugural championship. *(12 solo managers; no shared franchises)*\n"
             "* **2012 Season:** **Matt** won back-to-back titles as the #6 seed (`6-7-0`, `1,190 PF`), defeating **Lukas**, **Noah**, and **Sean**. **Eli** (`10-3-0`, `1,429 PF`) won the regular-season scoring title. *(Shared Franchise: **Jack & Austin**)*\n"
-            "* **2013 Season:** **Max & Keith** won the league championship, advancing out of a Semifinal field with **Jack**, **Cav**, and **Austin**. *(Shared Franchise: **Max & Keith**)*\n"
+            "* **2013 Season:** **Max & Keith** won the league championship, defeating **Cav** in the Week 16 Final after **Max & Keith** beat **Austin** and **Cav** upset **Jack** in the Week 15 Semifinals. *(Shared Franchise: **Max & Keith**)*\n"
             "* **2014 Season:** **David** (`10-3-0`) won the championship, defeating **Jack** (`9-4-0`) in the Week 16 Final. *(Shared Franchise: **Cam & Eli**)*"
         )
         st_df = data.get("Standings_2012_2014", pd.DataFrame())
@@ -156,6 +157,35 @@ def render():
             f'<tbody>{"".join(rows_html)}</tbody></table></div>',
             unsafe_allow_html=True
         )
+
+    elif sub_view == "2013 Season Archive (Matchups, Rosters & Lore)":
+        st.markdown("#### 2013 Reconstructed Matchups, Rosters & Season Lore")
+        st.caption("Verified 2013 matchups, playoff bracket outcomes, trade negotiations, and roster snapshots reconstructed from historical league messages and ESPN trade logs.")
+
+        m13 = data.get("Matchups_2013", pd.DataFrame())
+        n13 = data.get("Archive_Notes_2013", pd.DataFrame())
+
+        if not m13.empty:
+            st.markdown("##### Verified 2013 Matchups & Playoff Bracket")
+            mgr_opts_13 = ["All Managers"] + sorted(set(m13["Manager_1"].astype(str).tolist() + m13["Manager_2"].astype(str).tolist()))
+            sel_m13 = st.selectbox("Filter 2013 Matchups by Manager:", mgr_opts_13, key="db13_matchup_mgr")
+            sub_m13 = m13.copy()
+            if sel_m13 != "All Managers":
+                sub_m13 = sub_m13[(sub_m13["Manager_1"] == sel_m13) | (sub_m13["Manager_2"] == sel_m13)]
+            render_table(
+                sub_m13[["Phase", "Manager_1", "Manager_2", "Outcome", "Source", "Notes"]].rename(
+                    columns={"Manager_1": "Team 1", "Manager_2": "Team 2"}
+                ),
+                left_align_cols=["Notes"]
+            )
+
+        if not n13.empty:
+            st.markdown("##### 2013 Season Timeline, Trade Lore & Verified Rosters")
+            cat_f = st.radio("View:", ["All 2013 Notes", "Timeline & Lore", "Verified Roster"], horizontal=True, key="db13_notes_cat")
+            sub_n13 = n13.copy()
+            if cat_f != "All 2013 Notes":
+                sub_n13 = sub_n13[sub_n13["Category"] == cat_f]
+            render_table(sub_n13[["Category", "Date", "Week", "Managers", "Details"]], left_align_cols=["Managers", "Details"])
 
     elif sub_view == "Team Schedules & Season Logs (2012 & 2014)":
         c_yr_s, c_tm1, c_tm2 = st.columns([1.0, 1.2, 2.5])
