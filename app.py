@@ -3423,14 +3423,15 @@ elif active_tab == "Records":
 
     elif rec_type == "Most & Least PPG in a Season by Position":
         st.write("### Most & Least PPG in a Season by Position (True Position Breakdown)")
-        st.caption("Uses the exact true-position starter breakdown (`QB`, `RB`, `WR`, `TE`, `D/ST`, `K` — players started in `RB/WR/TE` Flex are credited to their true position), divided by games played in that season.")
+        st.caption("Uses the exact true-position starter breakdown (`QB`, `RB`, `WR`, `TE`, `D/ST`, `K` — players started in `RB/WR/TE` Flex are credited to their true position). Toggle between **Points Per Game (PPG)** and **Points Per Starter** with visible starter counts to spot flex-heavy lineups.")
         if box_df.empty:
             st.info("Box score data not available.")
         else:
-            cp1, cp2, cp3 = st.columns([1.2, 1.4, 2.0])
+            cp1, cp2, cp3, cp4 = st.columns([0.9, 1.5, 1.1, 1.7])
             pos_rec_sel = cp1.selectbox("Position:", ["QB", "RB", "WR", "TE", "D/ST", "K"], key="pos_ppg_rec_pos")
-            pos_rec_dir = cp2.radio("Ranking:", ["Most PPG", "Least PPG"], horizontal=True, key="pos_ppg_rec_dir")
-            pos_rec_scope = cp3.radio("Game Scope:", ["Regular Season Only", "Regular Season + Playoffs"], horizontal=True, key="pos_ppg_rec_scope")
+            pos_rec_metric = cp2.radio("Metric:", ["Points Per Game (PPG)", "Points Per Starter"], horizontal=True, key="pos_ppg_rec_metric")
+            pos_rec_dir = cp3.radio("Ranking:", ["Most", "Least"], horizontal=True, key="pos_ppg_rec_dir")
+            pos_rec_scope = cp4.radio("Game Scope:", ["Regular Season Only", "Regular Season + Playoffs"], horizontal=True, key="pos_ppg_rec_scope")
 
             slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
             pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
@@ -3464,30 +3465,43 @@ elif active_tab == "Records":
 
             gp_szn_tm = el_pp.groupby(['Season_Str', 'Team_Str']).size().reset_index(name='Games')
             m_pp = pd.merge(st_pp, el_pp[['Season_Str', 'Week_Num', 'Team_Str']], on=['Season_Str', 'Week_Num', 'Team_Str'], how='inner')
-            pts_szn_tm = m_pp.groupby(['Season_Str', 'Team_Str'])['Pts_Num'].sum().reset_index(name='Total_Pts')
+            agg_szn_tm = m_pp.groupby(['Season_Str', 'Team_Str']).agg(
+                Total_Pts=('Pts_Num', 'sum'),
+                Starts=('Pts_Num', 'count')
+            ).reset_index()
 
-            res_pp = pd.merge(gp_szn_tm, pts_szn_tm, on=['Season_Str', 'Team_Str'], how='left')
+            res_pp = pd.merge(gp_szn_tm, agg_szn_tm, on=['Season_Str', 'Team_Str'], how='left')
             res_pp['Total_Pts'] = res_pp['Total_Pts'].fillna(0.0)
+            res_pp['Starts'] = res_pp['Starts'].fillna(0).astype(int)
             res_pp = res_pp[res_pp['Games'] > 0].copy()
+            if pos_rec_metric == "Points Per Starter":
+                res_pp = res_pp[res_pp['Starts'] > 0].copy()
             res_pp['PPG_Num'] = res_pp['Total_Pts'] / res_pp['Games']
+            res_pp['PPS_Num'] = res_pp.apply(lambda r: r['Total_Pts'] / r['Starts'] if r['Starts'] > 0 else 0.0, axis=1)
 
-            # Pull season record map from s_agg if available
             rec_szn_map = {(str(r['Season']), str(r['Team'])): str(r['Record']) for _, r in s_agg.iterrows()} if not s_agg.empty else {}
             res_pp['Record'] = res_pp.apply(lambda r: rec_szn_map.get((r['Season_Str'], r['Team_Str']), ""), axis=1)
             res_pp['Regular Season Finish'] = res_pp.apply(lambda r: rs_map.get((r['Season_Str'], r['Team_Str']), ""), axis=1)
             res_pp['Playoff Outcome'] = res_pp.apply(lambda r: po_map.get((r['Season_Str'], r['Team_Str']), ""), axis=1)
 
-            asc_pp = (pos_rec_dir == "Least PPG")
+            sort_col_pp = 'PPG_Num' if pos_rec_metric == "Points Per Game (PPG)" else 'PPS_Num'
+            asc_pp = (pos_rec_dir == "Least")
             lim_pp = 20 if asc_pp else 15
-            ranked_pp = res_pp.sort_values(['PPG_Num', 'Season_Str'], ascending=[asc_pp, False]).head(lim_pp).reset_index(drop=True)
-            ranked_pp = apply_competition_rank(ranked_pp, 'PPG_Num', round_digits=1)
+            ranked_pp = res_pp.sort_values([sort_col_pp, 'Season_Str'], ascending=[asc_pp, False]).head(lim_pp).reset_index(drop=True)
+            ranked_pp = apply_competition_rank(ranked_pp, sort_col_pp, round_digits=1)
             ranked_pp['Season_Display'] = ranked_pp['Season_Str'].apply(lambda s: f"{s}*" if str(s) == '2026' else str(s))
             ranked_pp[f'{pos_rec_sel} PPG'] = ranked_pp['PPG_Num'].apply(lambda x: f"{float(x):.1f}")
+            ranked_pp[f'{pos_rec_sel} Pts/Start'] = ranked_pp['PPS_Num'].apply(lambda x: f"{float(x):.1f}")
             ranked_pp[f'{pos_rec_sel} Total Pts'] = ranked_pp['Total_Pts'].apply(lambda x: f"{float(x):.1f}")
 
+            metric_cols = (
+                [f'{pos_rec_sel} PPG', f'{pos_rec_sel} Pts/Start', f'{pos_rec_sel} Total Pts']
+                if pos_rec_metric == "Points Per Game (PPG)"
+                else [f'{pos_rec_sel} Pts/Start', f'{pos_rec_sel} PPG', f'{pos_rec_sel} Total Pts']
+            )
             render_html_table(
-                ranked_pp[['Rank', 'Season_Display', 'Team_Str', 'Record', 'Games', f'{pos_rec_sel} PPG', f'{pos_rec_sel} Total Pts', 'Regular Season Finish', 'Playoff Outcome']].rename(
-                    columns={'Season_Display': 'Season', 'Team_Str': 'Team'}
+                ranked_pp[['Rank', 'Season_Display', 'Team_Str', 'Record', 'Games', 'Starts'] + metric_cols + ['Regular Season Finish', 'Playoff Outcome']].rename(
+                    columns={'Season_Display': 'Season', 'Team_Str': 'Team', 'Starts': f'{pos_rec_sel} Starts'}
                 ),
                 highlight_fn=lambda r: ['font-style: italic; color: #1e3a8a;' if '*' in str(r.get('Season', '')) else '' for _ in r.index]
             )
@@ -3952,13 +3966,13 @@ elif active_tab == "Records":
         st.write("### Positional Scoring by Team (True Position Breakdown)")
         st.write("Total starter points scored by each franchise broken down strictly by true player position (`QB`, `RB`, `WR`, `TE`, `D/ST`, `K`). Players started in the `RB/WR/TE` Flex slot are credited to their true position (`RB`, `WR`, or `TE`).")
 
-        c1, c2, c3 = st.columns([1.4, 1.8, 1.8])
+        c1, c2, c3 = st.columns([1.1, 1.6, 2.3])
         with c1:
             pos_szn_sel = st.selectbox("Select Season:", ["2026"] + [s for s in seasons_list if str(s) != "2026"] + ["All-Time"], key="pos_tbl_szn")
         with c2:
             pos_gm_scope = st.radio("Game Scope:", ["Regular Season Only", "Regular Season + Playoffs"], horizontal=True, key="pos_tbl_scope")
         with c3:
-            pos_disp_unit = st.radio("Display Format:", ["Total Points", "Points Per Game (PPG)", "% Share of Team Points"], horizontal=True, key="pos_tbl_unit")
+            pos_disp_unit = st.radio("Display Format:", ["Total Points", "Points Per Game (PPG)", "Points Per Starter", "% Share of Team Points"], horizontal=True, key="pos_tbl_unit")
 
         slot_c = 'Slot' if 'Slot' in box_df.columns else ('Lineup_Slot' if 'Lineup_Slot' in box_df.columns else 'Position')
         pts_c = 'Actual_Points' if 'Actual_Points' in box_df.columns else 'Points'
@@ -3999,10 +4013,13 @@ elif active_tab == "Records":
 
         if not m_pos.empty:
             piv = m_pos.pivot_table(index='Team_Str', columns='True_Pos', values='Pts_Num', aggfunc='sum', fill_value=0.0)
+            piv_cnt = m_pos.pivot_table(index='Team_Str', columns='True_Pos', values='Pts_Num', aggfunc='count', fill_value=0)
             pos_cols = ['QB', 'RB', 'WR', 'TE', 'D/ST', 'K']
             for pc in pos_cols:
                 if pc not in piv.columns:
                     piv[pc] = 0.0
+                if pc not in piv_cnt.columns:
+                    piv_cnt[pc] = 0
             piv['Total'] = piv[pos_cols].sum(axis=1)
             piv = piv.sort_values('Total', ascending=False)
 
@@ -4010,22 +4027,35 @@ elif active_tab == "Records":
             for tm_name, r_vals in piv.iterrows():
                 gp_cnt = max(1, int(gp_by_team.get(tm_name, 1)))
                 tot_v = float(r_vals['Total'])
-                row_d = {'Team': tm_name, 'GP': gp_cnt, 'Sort_Val': tot_v if pos_disp_unit != "Points Per Game (PPG)" else (tot_v / gp_cnt)}
+                tot_starts = int(sum(int(piv_cnt.loc[tm_name, pc]) for pc in pos_cols)) if tm_name in piv_cnt.index else 0
+                if pos_disp_unit == "Points Per Game (PPG)":
+                    sort_v = tot_v / gp_cnt
+                elif pos_disp_unit == "Points Per Starter":
+                    sort_v = (tot_v / tot_starts) if tot_starts > 0 else 0.0
+                else:
+                    sort_v = tot_v
+                row_d = {'Team': tm_name, 'GP': gp_cnt, 'Sort_Val': sort_v}
                 for pc in pos_cols:
                     v = float(r_vals[pc])
+                    c_st = int(piv_cnt.loc[tm_name, pc]) if tm_name in piv_cnt.index else 0
                     if pos_disp_unit == "Total Points":
                         row_d[pc] = f"{v:,.1f}"
                     elif pos_disp_unit == "Points Per Game (PPG)":
                         row_d[pc] = f"{v / gp_cnt:.1f}"
+                    elif pos_disp_unit == "Points Per Starter":
+                        row_d[pc] = f"{v / c_st:.1f}" if c_st > 0 else "-"
                     else:
                         row_d[pc] = f"{(v / tot_v * 100.0):.1f}%" if tot_v > 0 else "0.0%"
+                row_d['RB Starts'] = int(piv_cnt.loc[tm_name, 'RB']) if tm_name in piv_cnt.index else 0
+                row_d['WR Starts'] = int(piv_cnt.loc[tm_name, 'WR']) if tm_name in piv_cnt.index else 0
+                row_d['TE Starts'] = int(piv_cnt.loc[tm_name, 'TE']) if tm_name in piv_cnt.index else 0
                 row_d['Total Pts'] = f"{tot_v:,.1f}"
                 row_d['PPG'] = f"{tot_v / gp_cnt:.1f}"
                 out_pos_rows.append(row_d)
 
             pos_res_df = pd.DataFrame(out_pos_rows).sort_values('Sort_Val', ascending=False).reset_index(drop=True)
             pos_res_df = apply_competition_rank(pos_res_df, 'Sort_Val', round_digits=1)
-            render_html_table(pos_res_df[['Rank', 'Team', 'GP', 'QB', 'RB', 'WR', 'TE', 'D/ST', 'K', 'Total Pts', 'PPG']])
+            render_html_table(pos_res_df[['Rank', 'Team', 'GP', 'QB', 'RB', 'WR', 'TE', 'D/ST', 'K', 'RB Starts', 'WR Starts', 'TE Starts', 'Total Pts', 'PPG']])
         else:
             st.info("No positional scoring data found for the selected filter.")
 
