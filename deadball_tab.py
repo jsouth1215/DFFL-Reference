@@ -44,7 +44,7 @@ def render_table(df, left_align_cols=None):
     st.markdown(f'<div style="width:100%; overflow-x:auto; margin:6px 0 18px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">{styled_html}</div>', unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
-def load_deadball_data_v8():
+def load_deadball_data_v9():
     out = {}
     try:
         xls = pd.ExcelFile("deadball_era_data.xlsx", engine="openpyxl")
@@ -73,7 +73,7 @@ def render():
         "In 2011, 12 solo managers competed across 12 teams. From 2012 to 2014, 13 managers competed for 12 franchise spots, with the two bottom consolation finishers from the prior year co-managing a shared franchise."
     )
 
-    data = load_deadball_data_v8()
+    data = load_deadball_data_v9()
     if not data:
         st.warning("Upload `deadball_era_data.xlsx` to the repository root to view the Deadball Era archive.")
         return
@@ -99,7 +99,7 @@ def render():
             "#### Deadball Era Champions & Shared Franchises\n"
             "* **2011 Season:** **Matt** won the inaugural championship. *(12 solo managers; no shared franchises)*\n"
             "* **2012 Season:** **Matt** won back-to-back titles as the #6 seed (`6-7-0`, `1,190 PF`), defeating **Lukas**, **Noah**, and **Sean**. **Eli** (`10-3-0`, `1,429 PF`) won the regular-season scoring title. *(Shared Franchise: **Jack & Austin**)*\n"
-            "* **2013 Season:** **Max & Keith** won the league championship, defeating **Cav** in the Week 16 Final after **Max & Keith** beat **Austin** and **Cav** upset **Jack** in the Week 15 Semifinals. *(Shared Franchise: **Max & Keith**)*\n"
+            "* **2013 Season:** **Max & Keith** won the league championship, defeating **Cav** in the Week 16 Final after **Max & Keith** beat **Austin** and **Cav** upset **Jack** in the Week 15 Semifinals (**Noah** and **CJ** rounded out the 6-team field as Week 14 Quarterfinalists). *(Shared Franchise: **Max & Keith**)*\n"
             "* **2014 Season:** **David** (`10-3-0`) won the championship, defeating **Jack** (`9-4-0`) in the Week 16 Final. *(Shared Franchise: **Cam & Eli**)*"
         )
         st_df = data.get("Standings_2012_2014", pd.DataFrame())
