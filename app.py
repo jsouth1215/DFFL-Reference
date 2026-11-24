@@ -711,14 +711,12 @@ def get_franchise_playoff_outcome_html(playoff_games_for_season):
     return "Made Playoffs"
 
 @st.cache_data
-def load_historical_odds_cache_v2():
-    if not os.path.exists("historical_odds_cache.pkl"):
-        return {}
-    try:
-        with open("historical_odds_cache.pkl", "rb") as pf:
-            return pickle.load(pf)
-    except Exception:
-        return {}
+def load_historical_odds_summary_v1():
+    import json
+    if os.path.exists("historical_odds_summary.json"):
+        with open("historical_odds_summary.json", "r", encoding="utf-8") as jf:
+            return json.load(jf)
+    return []
 
 def display_box_score(b_season, b_week, b_team, box_df, games):
     if box_df.empty:
@@ -3789,9 +3787,9 @@ elif active_tab == "Records":
     elif rec_type == "Playoff Odds Comebacks & Collapses":
         st.write("### Playoff Odds Comebacks & Collapses (2017-2025)")
         st.caption("Tracks each team-season's most extreme in-season weekly Monte Carlo playoff projection across all regular-season weeks (prior to the final week).")
-        odds_cache = load_historical_odds_cache_v2()
-        if not odds_cache:
-            st.info("Historical odds archive (`historical_odds_cache.pkl`) not found.")
+        odds_rows = load_historical_odds_summary_v1()
+        if not odds_rows:
+            st.info("Historical odds archive (`historical_odds_summary.json`) not found.")
         else:
             oc_mode = st.radio(
                 "View:",
@@ -3806,43 +3804,39 @@ elif active_tab == "Records":
 
             comebacks = {}
             collapses = {}
-            for (szn_k, wk_k), val in odds_cache.items():
-                szn_s = str(szn_k).replace('.0', '').strip()
+            for r_w in odds_rows:
+                szn_s = str(r_w['Season']).replace('.0', '').strip()
                 if szn_s not in completed_playoff_seasons:
                     continue
-                wk_i = int(wk_k)
+                wk_i = int(r_w['Week'])
                 max_wk = int(max_wk_by_szn.get(szn_s, 14))
                 if wk_i >= max_wk:
                     continue
-                df_w = val[0] if isinstance(val, tuple) else val
-                if df_w is None or df_w.empty:
-                    continue
-                for _, r_w in df_w.iterrows():
-                    tm_n = str(r_w['Team']).strip()
-                    p_val = float(r_w.get('_sort_po', 0.0))
-                    entry = {
-                        'Season': szn_s,
-                        'Team': tm_n,
-                        'Week': f"Week {wk_i}",
-                        'Wk_Num': wk_i,
-                        'Record at Week': str(r_w.get('Current Record', '')),
-                        'Prob_Num': p_val,
-                        'Playoff %': str(r_w.get('Playoff %', f"{p_val*100.0:.1f}%")),
-                        'Playoff ML': str(r_w.get('Playoff ML', '')),
-                        'Final Record': final_rec_map.get((szn_s, tm_n), ''),
-                        'Regular Season Finish': rs_map.get((szn_s, tm_n), ''),
-                        'Playoff Outcome': po_map.get((szn_s, tm_n), '')
-                    }
-                    made_po = (szn_s, tm_n) in po_map
-                    key_st = (szn_s, tm_n)
-                    if made_po:
-                        prev = comebacks.get(key_st)
-                        if prev is None or p_val < prev['Prob_Num'] - 1e-9 or (abs(p_val - prev['Prob_Num']) <= 1e-9 and wk_i > prev['Wk_Num']):
-                            comebacks[key_st] = entry
-                    else:
-                        prev = collapses.get(key_st)
-                        if prev is None or p_val > prev['Prob_Num'] + 1e-9 or (abs(p_val - prev['Prob_Num']) <= 1e-9 and wk_i > prev['Wk_Num']):
-                            collapses[key_st] = entry
+                tm_n = str(r_w['Team']).strip()
+                p_val = float(r_w['Prob'])
+                entry = {
+                    'Season': szn_s,
+                    'Team': tm_n,
+                    'Week': f"Week {wk_i}",
+                    'Wk_Num': wk_i,
+                    'Record at Week': str(r_w.get('Record', '')),
+                    'Prob_Num': p_val,
+                    'Playoff %': str(r_w.get('Playoff_Pct', f"{p_val*100.0:.1f}%")),
+                    'Playoff ML': str(r_w.get('Playoff_ML', '')),
+                    'Final Record': final_rec_map.get((szn_s, tm_n), ''),
+                    'Regular Season Finish': rs_map.get((szn_s, tm_n), ''),
+                    'Playoff Outcome': po_map.get((szn_s, tm_n), '')
+                }
+                made_po = (szn_s, tm_n) in po_map
+                key_st = (szn_s, tm_n)
+                if made_po:
+                    prev = comebacks.get(key_st)
+                    if prev is None or p_val < prev['Prob_Num'] - 1e-9 or (abs(p_val - prev['Prob_Num']) <= 1e-9 and wk_i > prev['Wk_Num']):
+                        comebacks[key_st] = entry
+                else:
+                    prev = collapses.get(key_st)
+                    if prev is None or p_val > prev['Prob_Num'] + 1e-9 or (abs(p_val - prev['Prob_Num']) <= 1e-9 and wk_i > prev['Wk_Num']):
+                        collapses[key_st] = entry
 
             if oc_mode.startswith("Worst Odds"):
                 cb_df = pd.DataFrame(list(comebacks.values()))
