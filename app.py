@@ -1014,6 +1014,17 @@ def get_drafted_never_dropped_never_started(_box_df, _games, include_active=Fals
     return pd.DataFrame(out_rows).sort_values(["Round_Num", "Pick_Num", "Season"], ascending=[True, True, False]).reset_index(drop=True)
 
 @st.cache_data(show_spinner=False)
+def load_zero_starters_meta(_mtime=0.0):
+    import json
+    if os.path.exists("zero_starters_meta.json"):
+        try:
+            with open("zero_starters_meta.json", "r", encoding="utf-8") as _zf:
+                return json.load(_zf)
+        except Exception:
+            return {}
+    return {}
+
+@st.cache_data(show_spinner=False)
 def get_starter_performances(_box_df, _games, _rows_len=0):
     if _box_df.empty or _games.empty: return pd.DataFrame()
     b_c = _box_df.copy()
@@ -1832,13 +1843,155 @@ def render_player_records_section(box_df_in=None, preselected_rec=None):
                 "Any Negative Starter (< 0.0 Pts)",
                 "Negative Non-D/ST Starter (< 0.0 Pts)",
                 "Negative D/ST (< 0.0 Pts)",
-                "-5.0 or Worse Starter (<= -5.0 Pts)"
+                "-5.0 or Worse Starter (<= -5.0 Pts)",
+                "Zero-Point Starters (0.0 Pts)"
             ],
             horizontal=True,
             key="sit_lineup_mode"
         )
         p = get_starter_performances(b_use, games, len(b_use))
-        if not p.empty:
+        if not p.empty and sit_mode == "Zero-Point Starters (0.0 Pts)":
+            z_meta = load_zero_starters_meta(os.path.getmtime("zero_starters_meta.json") if os.path.exists("zero_starters_meta.json") else 0.0)
+            z_df = p[p['Points_Num'] == 0.0].copy()
+            if not z_df.empty:
+                z_df['Season_Clean'] = z_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                z_df['Season_Num'] = pd.to_numeric(z_df['Season_Clean'], errors='coerce').fillna(0).astype(int)
+                z_df['Week_Int'] = pd.to_numeric(z_df['Week'], errors='coerce').fillna(0).astype(int)
+
+                def _classify_zero(row):
+                    k = f"{row['Season_Clean']}|{int(row['Week_Int'])}|{str(row['Team']).strip()}|{str(row['Player']).strip()}"
+                    info = z_meta.get(k)
+                    if info:
+                        return pd.Series([info.get('cat', 'Played (0.0)'), info.get('detail', '')])
+                    pos_u = str(row['Pos']).upper()
+                    if pos_u in ['D/ST', 'DST', 'DEF', 'DP']:
+                        return pd.Series(['Played (D/ST)', 'Played (D/ST)'])
+                    return pd.Series(['Unverified (0.0)', 'Pending snap lookup'])
+
+                z_df[['Zero_Cat', 'Zero_Detail']] = z_df.apply(_classify_zero, axis=1)
+
+                zc1, zc2 = st.columns([3, 1.4])
+                with zc1:
+                    z_cat_sel = st.radio(
+                        "Zero-Point Category:",
+                        [
+                            "All Zero Starters",
+                            "Avoidable (Bye + Injured/DNP)",
+                            "Bye / No Game",
+                            "Injured / Inactive (DNP)",
+                            "Played (0.0 — Non-D/ST)",
+                            "Played (D/ST)"
+                        ],
+                        horizontal=True,
+                        key="sit_zero_cat"
+                    )
+                with zc2:
+                    z_era_sel = st.radio(
+                        "Box Score Era:",
+                        ["All (2017+)", "2019+ (Official ESPN)"],
+                        horizontal=True,
+                        key="sit_zero_era"
+                    )
+
+                if z_era_sel == "2019+ (Official ESPN)":
+                    z_df = z_df[z_df['Season_Num'] >= 2019].copy()
+                else:
+                    st.caption("Note: 2017–2018 lineups come from reconstructed box scores (all 15 Bye/No Game rows occur in 2017–2018). Switch to **2019+ (Official ESPN)** for official ESPN API lineups only.")
+
+                if z_cat_sel == "Avoidable (Bye + Injured/DNP)":
+                    z_filt = z_df[z_df['Zero_Cat'].isin(['Bye / No Game', 'Injured / Inactive (DNP)'])].copy()
+                elif z_cat_sel == "Bye / No Game":
+                    z_filt = z_df[z_df['Zero_Cat'] == 'Bye / No Game'].copy()
+                elif z_cat_sel == "Injured / Inactive (DNP)":
+                    z_filt = z_df[z_df['Zero_Cat'] == 'Injured / Inactive (DNP)'].copy()
+                elif z_cat_sel == "Played (0.0 — Non-D/ST)":
+                    z_filt = z_df[z_df['Zero_Cat'] == 'Played (0.0)'].copy()
+                elif z_cat_sel == "Played (D/ST)":
+                    z_filt = z_df[z_df['Zero_Cat'] == 'Played (D/ST)'].copy()
+                else:
+                    z_filt = z_df.copy()
+
+                if not z_filt.empty:
+                    z_game_map = {}
+                    z_mgr = {}
+                    for _, r in z_filt.iterrows():
+                        tm_s = str(r['Team'])
+                        g_key = (r['Season_Clean'], int(r['Week_Int']), tm_s)
+                        wl = _is_win_loss(r['Outcome'])
+                        if g_key not in z_game_map:
+                            z_game_map[g_key] = {'Team': tm_s, 'WL': wl}
+                        if tm_s not in z_mgr:
+                            z_mgr[tm_s] = {
+                                'W': 0, 'L': 0, 'T': 0, 'Starts': 0,
+                                'Bye': 0, 'DNP': 0, 'Played': 0, 'DST': 0,
+                                'Latest_Key': (-1, -1), 'Latest_Str': '-'
+                            }
+                        z_mgr[tm_s]['Starts'] += 1
+                        cat_v = r['Zero_Cat']
+                        if cat_v == 'Bye / No Game': z_mgr[tm_s]['Bye'] += 1
+                        elif cat_v == 'Injured / Inactive (DNP)': z_mgr[tm_s]['DNP'] += 1
+                        elif cat_v == 'Played (D/ST)': z_mgr[tm_s]['DST'] += 1
+                        else: z_mgr[tm_s]['Played'] += 1
+                        lk = (int(r['Season_Num']), int(r['Week_Int']))
+                        if lk > z_mgr[tm_s]['Latest_Key']:
+                            z_mgr[tm_s]['Latest_Key'] = lk
+                            z_mgr[tm_s]['Latest_Str'] = make_box_link(f"{r['Player']} ({r['Season_Clean']} W{int(r['Week_Int'])})", r['Season_Clean'], int(r['Week_Int']), tm_s)
+
+                    for g_key, g_info in z_game_map.items():
+                        tm_s = g_info['Team']
+                        if g_info['WL'] == 'W': z_mgr[tm_s]['W'] += 1
+                        elif g_info['WL'] == 'L': z_mgr[tm_s]['L'] += 1
+                        elif g_info['WL'] == 'T': z_mgr[tm_s]['T'] += 1
+
+                    z_rows = []
+                    for tm_s, d in z_mgr.items():
+                        g_tot = d['W'] + d['L'] + d['T']
+                        wp = (d['W'] + 0.5 * d['T']) / g_tot * 100.0 if g_tot > 0 else 0.0
+                        z_rows.append({
+                            'Team': tm_s,
+                            'Total 0.0s': d['Starts'],
+                            'Bye / No Game': d['Bye'],
+                            'Injured / DNP': d['DNP'],
+                            'Played (0.0)': d['Played'],
+                            'Played (D/ST)': d['DST'],
+                            'Games': g_tot,
+                            'Record': f"{d['W']}-{d['L']}" + (f"-{d['T']}" if d['T'] > 0 else "") if g_tot > 0 else "-",
+                            'Win %': f"{wp:.1f}%" if g_tot > 0 else "-",
+                            'Wins_Num': d['W'],
+                            'Games_Num': g_tot,
+                            'Most Recent': d['Latest_Str']
+                        })
+
+                    z_tbl = pd.DataFrame(z_rows).sort_values(['Total 0.0s', 'Games_Num', 'Wins_Num'], ascending=[False, False, False]).reset_index(drop=True)
+                    z_tbl = apply_competition_rank(z_tbl, 'Total 0.0s', round_digits=0)
+                    tw_z = sum(x['Wins_Num'] for x in z_rows)
+                    tg_z = sum(x['Games_Num'] for x in z_rows)
+                    tot_starts_z = sum(x['Total 0.0s'] for x in z_rows)
+                    st.markdown(f"**League-Wide ({z_cat_sel}):** **`{tot_starts_z}`** starts across **`{tg_z}`** games — Record: **`{tw_z}-{tg_z - tw_z}`** (`{tw_z/max(1,tg_z)*100:.1f}%`)")
+
+                    if z_cat_sel == "All Zero Starters":
+                        render_html_table(z_tbl[['Rank', 'Team', 'Total 0.0s', 'Bye / No Game', 'Injured / DNP', 'Played (0.0)', 'Played (D/ST)', 'Games', 'Record', 'Win %']])
+                    elif z_cat_sel == "Avoidable (Bye + Injured/DNP)":
+                        render_html_table(z_tbl[['Rank', 'Team', 'Total 0.0s', 'Bye / No Game', 'Injured / DNP', 'Games', 'Record', 'Win %']].rename(columns={'Total 0.0s': 'Avoidable 0.0s'}))
+                    else:
+                        render_html_table(z_tbl[['Rank', 'Team', 'Total 0.0s', 'Games', 'Record', 'Win %', 'Most Recent']].rename(columns={'Total 0.0s': 'Starts'}), left_align_cols=['Most Recent'])
+
+                    st.markdown("#### Zero-Point Starter Game Log")
+                    z_tm_filter = st.selectbox("Filter Log by Fantasy Team:", ["All Teams"] + sorted(z_filt['Team'].unique().tolist()), key="sit_zero_tm_filter")
+                    z_log = z_filt if z_tm_filter == "All Teams" else z_filt[z_filt['Team'] == z_tm_filter]
+                    z_log = z_log.sort_values(['Season_Num', 'Week_Int', 'Team', 'Player'], ascending=[False, False, True, True]).reset_index(drop=True)
+                    z_log['Pts'] = z_log.apply(lambda r: make_box_link("0.0", r['Season_Clean'], int(r['Week_Int']), r['Team']), axis=1)
+                    render_html_table(
+                        z_log[['Season_Clean', 'Week_Int', 'Team', 'Player', 'Pos', 'NFL Team', 'Zero_Cat', 'Zero_Detail', 'Opponent', 'Outcome', 'Pts']].rename(
+                            columns={'Season_Clean': 'Season', 'Week_Int': 'Week', 'NFL Team': 'NFL', 'Zero_Cat': 'Category', 'Zero_Detail': 'Details'}
+                        ),
+                        left_align_cols=['Player', 'Category', 'Details']
+                    )
+                else:
+                    st.info("No matching zero-point starter games found for this filter.")
+            else:
+                st.info("No zero-point starter games found.")
+        elif not p.empty:
             is_dst_pos = p['Pos'].isin(['D/ST', 'DST', 'DEF', 'DP'])
             if sit_mode == "40+ Point Starter in Lineup":
                 sub_p = p[p['Points_Num'] >= 40.0].copy()
@@ -2452,7 +2605,8 @@ elif active_tab == "Franchise":
                 "Highest Scoring Players",
                 "Weekly Bag Weeks",
                 "Weekly Last Place Weeks",
-                "Negative Starters"
+                "Negative Starters",
+                "Zero-Point Starters"
             ],
             horizontal=True,
             key="fran_indiv_rec_sel"
@@ -2510,7 +2664,7 @@ elif active_tab == "Franchise":
                 lp_fr['Type'] = 'Regular Season'
                 lp_fr['Signed_Margin'] = lp_fr['Actual_Points'] - lp_fr['Opp_Points']
                 _fmt_game_tbl(lp_fr.sort_values(['Actual_Points', 'Season_Num', 'Week_Num'], ascending=[True, False, False]))
-        elif fr_rec_sel in ["Highest Scoring Players", "Negative Starters"]:
+        elif fr_rec_sel in ["Highest Scoring Players", "Negative Starters", "Zero-Point Starters"]:
             if box_df.empty:
                 st.info("Box score data not available.")
             else:
@@ -2544,6 +2698,59 @@ elif active_tab == "Franchise":
                             columns={name_c: 'Player', pos_c: 'Pos', 'Season_Str': 'Season', 'Week_Num': 'Week', 'Opponent_Team_Name': 'Opponent'}
                         )
                         render_html_table(disp_p)
+                elif fr_rec_sel == "Zero-Point Starters":
+                    z_meta_fr = load_zero_starters_meta(os.path.getmtime("zero_starters_meta.json") if os.path.exists("zero_starters_meta.json") else 0.0)
+                    zp = b_fr[b_fr['Pts_Num'] == 0.0].copy()
+                    if zp.empty:
+                        st.info(f"{selected_team} has no zero-point starter games on record.")
+                    else:
+                        zp['Season_Num'] = pd.to_numeric(zp['Season_Str'], errors='coerce').fillna(0).astype(int)
+                        def _fr_z_cls(row):
+                            k = f"{row['Season_Str']}|{int(row['Week_Num'])}|{selected_team}|{str(row[name_c]).strip()}"
+                            info = z_meta_fr.get(k)
+                            if info:
+                                return pd.Series([info.get('cat', 'Played (0.0)'), info.get('detail', '')])
+                            pos_u = str(row[pos_c]).upper()
+                            if pos_u in ['D/ST', 'DST', 'DEF', 'DP']:
+                                return pd.Series(['Played (D/ST)', 'Played (D/ST)'])
+                            return pd.Series(['Unverified (0.0)', 'Pending snap lookup'])
+
+                        zp[['Category', 'Details']] = zp.apply(_fr_z_cls, axis=1)
+                        fr_z_cat = st.radio(
+                            "Category Filter:",
+                            ["All", "Avoidable (Bye + DNP)", "Bye / No Game", "Injured / Inactive (DNP)", "Played (0.0)", "Played (D/ST)"],
+                            horizontal=True,
+                            key="fran_zero_cat_sel"
+                        )
+                        if fr_z_cat == "Avoidable (Bye + DNP)":
+                            zp_show = zp[zp['Category'].isin(['Bye / No Game', 'Injured / Inactive (DNP)'])].copy()
+                        elif fr_z_cat != "All":
+                            zp_show = zp[zp['Category'] == fr_z_cat].copy()
+                        else:
+                            zp_show = zp.copy()
+
+                        c_bye = int((zp['Category'] == 'Bye / No Game').sum())
+                        c_dnp = int((zp['Category'] == 'Injured / Inactive (DNP)').sum())
+                        c_pl = int((zp['Category'] == 'Played (0.0)').sum())
+                        c_dst = int((zp['Category'] == 'Played (D/ST)').sum())
+                        g_uniq = zp_show.drop_duplicates(subset=['Season_Str', 'Week_Num'])
+                        zw = int((g_uniq['Result'] == 'W').sum())
+                        zl = int((g_uniq['Result'] == 'L').sum())
+                        st.markdown(
+                            f"**{selected_team} Total 0.0 Starts:** `{len(zp)}` "
+                            f"(Bye/No Game: `{c_bye}` · Injured/DNP: `{c_dnp}` · Played 0.0: `{c_pl}` · Played D/ST: `{c_dst}`) | "
+                            f"**Filtered Record:** `{zw}-{zl}` (`{zw/max(1,zw+zl)*100:.1f}%`)"
+                        )
+                        if zp_show.empty:
+                            st.info(f"No `{fr_z_cat}` zero-point starts for {selected_team}.")
+                        else:
+                            zp_show = zp_show.sort_values(['Season_Num', 'Week_Num', name_c], ascending=[False, False, True]).reset_index(drop=True)
+                            zp_show['Points'] = zp_show.apply(lambda r: make_box_link("0.0", r['Season_Str'], r['Week_Num'], selected_team), axis=1)
+                            zp_show['Margin'] = zp_show['Signed_Margin'].apply(lambda x: f"{float(x):+.1f}")
+                            disp_z = zp_show[['Season_Str', 'Week_Num', 'Type', name_c, pos_c, 'Category', 'Details', 'Opponent_Team_Name', 'Result', 'Margin', 'Points']].rename(
+                                columns={name_c: 'Player', pos_c: 'Pos', 'Season_Str': 'Season', 'Week_Num': 'Week', 'Opponent_Team_Name': 'Opponent'}
+                            )
+                            render_html_table(disp_z, left_align_cols=['Player', 'Category', 'Details'])
                 else:
                     neg_p = b_fr[b_fr['Pts_Num'] < 0].sort_values(['Pts_Num', 'Season_Str', 'Week_Num'], ascending=[True, False, False]).reset_index(drop=True)
                     if neg_p.empty:

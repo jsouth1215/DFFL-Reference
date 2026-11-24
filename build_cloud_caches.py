@@ -99,6 +99,14 @@ def build_all():
         drops_df = value_engine.compute_drop_regret.__wrapped__(tx_clean, box_df)
         drops_df.to_pickle("cloud_cache_Drops.pkl")
         print(f"✔ cloud_cache_Drops.pkl ({len(drops_df)} rows, {os.path.getsize('cloud_cache_Drops.pkl')/1024:.0f} KB)")
+
+        # 5. Refresh Zero-Point Starter classifications (nflverse snaps/injuries/byes)
+        try:
+            import build_zero_starters
+            z_meta = build_zero_starters.build_zero_starters_meta(verbose=False)
+            print(f"✔ zero_starters_meta.json ({len(z_meta)} entries, {os.path.getsize('zero_starters_meta.json')/1024:.0f} KB)")
+        except Exception as e:
+            print(f"  [Note] Skipped zero_starters_meta.json refresh: {e}")
     finally:
         os.environ.pop("DFFL_REBUILD_CACHE", None)
 
