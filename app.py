@@ -4581,14 +4581,18 @@ elif active_tab == "Records":
 elif active_tab == "Playoffs":
     po_view_mode = st.radio(
         "Playoffs View:",
-        ["Playoff Brackets", "All-Time Playoff Record by Team"],
+        ["Playoff Brackets", "Playoff Machine", "All-Time Playoff Record by Team"],
         horizontal=True,
         label_visibility="collapsed",
         key="po_tab_view_mode"
     )
     st.write("---")
 
-    if po_view_mode == "Playoff Brackets":
+    if po_view_mode == "Playoff Machine":
+        import playoff_machine
+        playoff_machine.render_playoff_machine(games)
+
+    elif po_view_mode == "Playoff Brackets":
         c_po1, c_po2 = st.columns([1.5, 3.5])
         with c_po1:
             po_szn = st.selectbox("Select Season", seasons_list, key="po_bracket_szn")
