@@ -711,7 +711,7 @@ def get_franchise_playoff_outcome_html(playoff_games_for_season):
     return "Made Playoffs"
 
 @st.cache_data
-def load_historical_odds_cache_v1():
+def load_historical_odds_cache_v2():
     if not os.path.exists("historical_odds_cache.pkl"):
         return {}
     try:
@@ -2226,8 +2226,8 @@ if active_tab == "Home":
                     t2_str, s2 = _fmt_team_swing(t2, item.get('Team_2_Win_ML'), item.get('Team_2_Loss_ML'), item.get('Team_2_Swing_Pct'))
                     nw_rows.append({
                         'Matchup': f"{t1} ({rec_lookup.get(t1, '')}) vs. {t2} ({rec_lookup.get(t2, '')})",
-                        'All-Time H2H': _fmt_h2h_and_streak(t1, t2),
                         'Playoff Odds Swing': f"{t1_str}  /  {t2_str}",
+                        'All-Time H2H': _fmt_h2h_and_streak(t1, t2),
                         '_tot_swing': s1 + s2
                     })
                 nw_df = pd.DataFrame(nw_rows).sort_values('_tot_swing', ascending=False).drop(columns=['_tot_swing']).reset_index(drop=True)
@@ -3696,16 +3696,20 @@ elif active_tab == "Records":
 
     elif rec_type == "Best & Worst Season Winning Percentage":
         st.write("### Best & Worst Single-Season Winning Percentages")
-        st.caption("Regular-season winning percentage across completed seasons (`(W + 0.5*T) / GP`), normalizing 13-game and 14-game eras.")
+        st.caption("Regular-season winning percentage across completed seasons (`(W + 0.5*T) / GP`), normalizing 13-game and 14-game eras. Filtered to seasons with **10+ wins** (Best) or **10+ losses** (Worst).")
         if not s_comp.empty:
             wp_dir = st.radio("Ranking:", ["Best Winning %", "Worst Winning %"], horizontal=True, key="rec_wp_dir")
             wp_df = s_comp.copy()
             wp_df['Win_Pct_Num'] = (wp_df['W'] + 0.5 * wp_df['T']) / wp_df['Games_Count']
             wp_df['Win %'] = wp_df['Win_Pct_Num'].apply(lambda x: f"{x:.3f}".replace("0.", ".", 1) if x < 1.0 else f"{x:.3f}")
             asc_wp = (wp_dir == "Worst Winning %")
-            wp_df = wp_df.sort_values(['Win_Pct_Num', 'PPG_Num', 'Season'], ascending=[asc_wp, asc_wp, False]).head(20).reset_index(drop=True)
-            wp_df = apply_competition_rank(wp_df, 'Win_Pct_Num', round_digits=4)
-            render_html_table(wp_df[['Rank', 'Season', 'Team', 'Record', 'Win %', 'PF/G', 'Regular Season Finish', 'Playoff Outcome']])
+            wp_df = wp_df[wp_df['L'] >= 10].copy() if asc_wp else wp_df[wp_df['W'] >= 10].copy()
+            if not wp_df.empty:
+                wp_df = wp_df.sort_values(['Win_Pct_Num', 'PPG_Num', 'Season'], ascending=[asc_wp, asc_wp, False]).reset_index(drop=True)
+                wp_df = apply_competition_rank(wp_df, 'Win_Pct_Num', round_digits=4)
+                render_html_table(wp_df[['Rank', 'Season', 'Team', 'Record', 'Win %', 'PF/G', 'Regular Season Finish', 'Playoff Outcome']])
+            else:
+                st.info("No completed seasons meet the 10-win / 10-loss threshold.")
         else:
             st.info("No completed season records available.")
 
@@ -3741,16 +3745,14 @@ elif active_tab == "Records":
             for szn_s, tm_n, seq in out:
                 wks_str = f"W{seq[0][0]} - W{seq[-1][0]}"
                 scores_str = ", ".join(f"{p:.1f}" for _, p in seq)
-                avg_p = sum(p for _, p in seq) / len(seq)
                 rows.append({
                     'Season': f"{szn_s}*" if szn_s == '2026' else szn_s,
-                    'Season_Raw': szn_s,
+                    'Season_Sort': int(szn_s) if str(szn_s).isdigit() else 0,
+                    'Start_Wk': int(seq[0][0]),
                     'Team': tm_n,
                     'Streak': len(seq),
                     'Weeks': wks_str,
-                    'Weekly Scores': scores_str,
-                    'Avg_Num': avg_p,
-                    'Avg Score': f"{avg_p:.1f}"
+                    'Weekly Scores': scores_str
                 })
             return pd.DataFrame(rows)
 
@@ -3759,10 +3761,10 @@ elif active_tab == "Records":
         reg_bag_df['Season_Str'] = reg_bag_df['Season'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         bag_st_df = _extract_szn_flag_streaks(reg_bag_df, 'Is_High_Scorer')
         if not bag_st_df.empty:
-            bag_st_df = bag_st_df.sort_values(['Streak', 'Avg_Num', 'Season_Raw'], ascending=[False, False, False]).reset_index(drop=True)
+            bag_st_df = bag_st_df.sort_values(['Streak', 'Season_Sort', 'Start_Wk'], ascending=[False, True, True]).reset_index(drop=True)
             bag_st_df = apply_competition_rank(bag_st_df, 'Streak', round_digits=0)
             render_html_table(
-                bag_st_df[['Rank', 'Season', 'Team', 'Streak', 'Weeks', 'Weekly Scores', 'Avg Score']],
+                bag_st_df[['Rank', 'Season', 'Team', 'Streak', 'Weeks', 'Weekly Scores']],
                 highlight_fn=lambda r: ['font-style: italic; color: #1e3a8a;' if '*' in str(r.get('Season', '')) else '' for _ in r.index]
             )
         else:
@@ -3775,10 +3777,10 @@ elif active_tab == "Records":
         reg_lp_df['Is_Low_Scorer'] = (reg_lp_df['Actual_Points'] == reg_lp_df['Wk_Min_Pts'])
         lp_st_df = _extract_szn_flag_streaks(reg_lp_df, 'Is_Low_Scorer')
         if not lp_st_df.empty:
-            lp_st_df = lp_st_df.sort_values(['Streak', 'Avg_Num', 'Season_Raw'], ascending=[False, True, False]).reset_index(drop=True)
+            lp_st_df = lp_st_df.sort_values(['Streak', 'Season_Sort', 'Start_Wk'], ascending=[False, True, True]).reset_index(drop=True)
             lp_st_df = apply_competition_rank(lp_st_df, 'Streak', round_digits=0)
             render_html_table(
-                lp_st_df[['Rank', 'Season', 'Team', 'Streak', 'Weeks', 'Weekly Scores', 'Avg Score']],
+                lp_st_df[['Rank', 'Season', 'Team', 'Streak', 'Weeks', 'Weekly Scores']],
                 highlight_fn=lambda r: ['font-style: italic; color: #1e3a8a;' if '*' in str(r.get('Season', '')) else '' for _ in r.index]
             )
         else:
@@ -3787,7 +3789,7 @@ elif active_tab == "Records":
     elif rec_type == "Playoff Odds Comebacks & Collapses":
         st.write("### Playoff Odds Comebacks & Collapses (2017-2025)")
         st.caption("Tracks each team-season's most extreme in-season weekly Monte Carlo playoff projection across all regular-season weeks (prior to the final week).")
-        odds_cache = load_historical_odds_cache_v1()
+        odds_cache = load_historical_odds_cache_v2()
         if not odds_cache:
             st.info("Historical odds archive (`historical_odds_cache.pkl`) not found.")
         else:
