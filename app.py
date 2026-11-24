@@ -3786,7 +3786,6 @@ elif active_tab == "Records":
 
     elif rec_type == "Playoff Odds Comebacks & Collapses":
         st.write("### Playoff Odds Comebacks & Collapses (2017-2025)")
-        st.caption("Tracks each team-season's most extreme in-season weekly Monte Carlo playoff projection across all regular-season weeks (prior to the final week).")
         odds_rows = load_historical_odds_summary_v1()
         if not odds_rows:
             st.info("Historical odds archive (`historical_odds_summary.json`) not found.")
@@ -3841,19 +3840,23 @@ elif active_tab == "Records":
             if oc_mode.startswith("Worst Odds"):
                 cb_df = pd.DataFrame(list(comebacks.values()))
                 if not cb_df.empty:
-                    cb_df = cb_df.sort_values(['Prob_Num', 'Wk_Num', 'Season'], ascending=[True, False, False]).head(20).reset_index(drop=True)
+                    cb_df = cb_df[(cb_df['Prob_Num'] * 100.0).round(1) <= 20.0].copy()
+                if not cb_df.empty:
+                    cb_df = cb_df.sort_values(['Prob_Num', 'Wk_Num', 'Season'], ascending=[True, False, False]).reset_index(drop=True)
                     cb_df = apply_competition_rank(cb_df, 'Prob_Num', round_digits=3)
                     render_html_table(cb_df[['Rank', 'Season', 'Team', 'Week', 'Record at Week', 'Playoff %', 'Playoff ML', 'Final Record', 'Regular Season Finish', 'Playoff Outcome']])
                 else:
-                    st.info("No playoff comeback records found.")
+                    st.info("No playoff comebacks found at 20.0% or lower.")
             else:
                 cl_df = pd.DataFrame(list(collapses.values()))
                 if not cl_df.empty:
-                    cl_df = cl_df.sort_values(['Prob_Num', 'Wk_Num', 'Season'], ascending=[False, False, False]).head(20).reset_index(drop=True)
+                    cl_df = cl_df[(cl_df['Prob_Num'] * 100.0).round(1) >= 80.0].copy()
+                if not cl_df.empty:
+                    cl_df = cl_df.sort_values(['Prob_Num', 'Wk_Num', 'Season'], ascending=[False, False, False]).reset_index(drop=True)
                     cl_df = apply_competition_rank(cl_df, 'Prob_Num', round_digits=3)
                     render_html_table(cl_df[['Rank', 'Season', 'Team', 'Week', 'Record at Week', 'Playoff %', 'Playoff ML', 'Final Record', 'Regular Season Finish']])
                 else:
-                    st.info("No playoff collapse records found.")
+                    st.info("No playoff collapses found at 80.0% or higher.")
 
     elif rec_type == "Team Record - Highest Score":
         scores = [{'Team': t, 'Points_Num': float(games[games['Team_Name']==t].loc[games[games['Team_Name']==t]['Actual_Points'].idxmax()]['Actual_Points']), 'Points': f"{float(games[games['Team_Name']==t].loc[games[games['Team_Name']==t]['Actual_Points'].idxmax()]['Actual_Points']):.1f}", 'Season': str(games[games['Team_Name']==t].loc[games[games['Team_Name']==t]['Actual_Points'].idxmax()]['Season']).replace('.0',''), 'Week': games[games['Team_Name']==t].loc[games[games['Team_Name']==t]['Actual_Points'].idxmax()]['Week'], 'Opponent': games[games['Team_Name']==t].loc[games[games['Team_Name']==t]['Actual_Points'].idxmax()]['Opponent_Team_Name']} for t in teams_no_cam if not games[games['Team_Name']==t].empty]
